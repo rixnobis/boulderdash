@@ -179,6 +179,13 @@ void Cave::generate(const CaveSpec& spec, const uint8_t* instructions) {
     m_events = 0;
 }
 
+void Cave::placePlayer(unsigned x, unsigned y) {
+    set(x, y, El::Player);
+    // Dirt overhead, not space: dirt supports whatever is above it, so this
+    // stops the column falling rather than merely delaying it by a tick.
+    if (y > 0) set(x, y - 1, El::Dirt);
+}
+
 // ---------------------------------------------------------------------- rules
 
 bool Cave::slippery(uint8_t e) const {

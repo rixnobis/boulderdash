@@ -41,6 +41,9 @@ SOFTWARE.
 #include "common/syscalls/syscalls.h"
 
 #include "cave.hh"
+#include "levels.hh"
+
+#include "playtape.inc"
 #include "trace.inc"
 
 using namespace bd;
@@ -106,6 +109,28 @@ int main() {
 
     if (failures == 0) {
         ramsyscall_printf("  %u ticks, every hash matches the host\n", kTraceLength);
+    }
+
+    // Now actually play. Same rules, a winning run found on the host, replayed
+    // move for move by an R3000 - which has to reach the exit, not merely agree
+    // about hashes. Everything else in this file proves the two agree; this
+    // proves what they agree ABOUT is a finishable game.
+    {
+        static Cave cave;
+        const Level& level = kLevels[0];
+        cave.generate(level.spec, level.instructions);
+        cave.placePlayer(level.playerX, level.playerY);
+        for (unsigned i = 0; i < kPlayTapeLength; i++) {
+            Input in;
+            in.dx = kPlayTape[i][0];
+            in.dy = kPlayTape[i][1];
+            cave.tick(in);
+        }
+        const bool won = cave.status() == Status::Escaped;
+        ramsyscall_printf("  playback: %s after %u ticks, %u/%u diamonds - %s\n", level.name,
+                          cave.ticks(), cave.diamonds(), level.spec.diamondsNeeded,
+                          won ? "ESCAPED" : "did NOT escape");
+        if (!won) failures++;
     }
     ramsyscall_printf("BOULDERDASH selftest %s\n", failures == 0 ? "PASSED" : "FAILED");
     return failures == 0 ? 0 : 1;

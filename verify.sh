@@ -26,9 +26,10 @@ FAIL=0
 step() { echo; echo "=== $* ==="; }
 
 step "1/5 host rules"
-g++ -std=c++20 -O2 -Wall -o simtest simtest.cpp cave.cpp levels.cpp sound.cpp || { echo "host build FAILED"; exit 1; }
+g++ -std=c++20 -O2 -Wall -o simtest simtest.cpp cave.cpp levels.cpp sound.cpp agent.cpp || { echo "host build FAILED"; exit 1; }
 ./simtest || FAIL=1
 ./simtest --emit trace.inc || FAIL=1
+./simtest --emit-tape playtape.inc || FAIL=1
 
 step "2/5 build"
 rm -f ./*.o ./*.dep
@@ -45,7 +46,7 @@ done
 
 step "3/5 host vs R3000 differential"
 timeout 90 "$REDUX" -no-ui -run -stdout -testmode -interpreter -bios "$BIOS" \
-    -loadexe boulderdash-selftest.ps-exe 2>&1 | grep -aE "BOULDERDASH|FAIL|ticks simulated|matches"
+    -loadexe boulderdash-selftest.ps-exe 2>&1 | grep -aE "BOULDERDASH|FAIL|ticks simulated|matches|playback"
 SELFTEST=${PIPESTATUS[0]}
 echo "  exit=$SELFTEST"
 [ "$SELFTEST" -eq 0 ] || FAIL=1

@@ -239,7 +239,7 @@ void Viewer::createScene() {
 void SheetScene::loadLevel(unsigned index) {
     const Level& level = kLevels[index];
     m_cave.generate(level.spec, level.instructions);
-    m_cave.set(level.playerX, level.playerY, El::Player);
+    m_cave.placePlayer(level.playerX, level.playerY);
     m_secondsLeft = level.spec.timeLimit;
     m_secondTimer = 0;
     m_holdFrames = 0;

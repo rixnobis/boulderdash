@@ -146,6 +146,13 @@ class Cave {
     uint8_t at(unsigned x, unsigned y) const { return m_grid[y * kCaveWidth + x]; }
     void set(unsigned x, unsigned y, uint8_t e) { m_grid[y * kCaveWidth + x] = e; }
 
+    // Places the player AND makes the start survivable. The random fill does not
+    // know where the player will stand, so a boulder directly overhead is a
+    // coin flip on every cave - and it kills on tick one, before an input has
+    // been read. PAYLOAD died at tick 9 to exactly this and looked for all the
+    // world like a bug in the physics.
+    void placePlayer(unsigned x, unsigned y);
+
     Status status() const { return m_status; }
     uint16_t diamonds() const { return m_diamonds; }
     uint32_t ticks() const { return m_ticks; }

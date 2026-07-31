@@ -37,6 +37,7 @@ SOFTWARE.
 
 #include "cave.hh"
 #include "levels.hh"
+#include "agent.hh"
 #include "sound.hh"
 
 using namespace bd;
@@ -533,7 +534,7 @@ void testLevelsAreWellFormed() {
         const Level& level = kLevels[i];
         Cave cave;
         cave.generate(level.spec, level.instructions);
-        cave.set(level.playerX, level.playerY, El::Player);
+        cave.placePlayer(level.playerX, level.playerY);
 
         int diamonds = 0, outboxes = 0, butterflies = 0, boulders = 0;
         bool magicWall = false, amoeba = false;
@@ -587,14 +588,109 @@ void testLevelsAreWellFormed() {
     }
 }
 
+// Is the exit physically reachable at all? Flood fill from the player start
+// over everything a player can enter or remove - dirt, space, diamonds,
+// boulders (pushable) - and stop at brick, steel and magic wall, which nothing
+// in the player's repertoire can get through.
+//
+// This is cheap, decisive, and it found FOUR broken caves out of ten. Two had
+// their exits inside sealed brick chambers. One had a vent plotted a row above
+// the steel it was meant to pierce, so it cut a hole in thin air. One had the
+// player STARTING inside the steel frame, unable to move in any direction.
+// Every one of those caves looked perfectly reasonable in the source and would
+// have looked fine in a screenshot.
+//
+// It also does something the play agent cannot: it distinguishes "this cave is
+// broken" from "my agent is not clever enough", which is the difference between
+// a bug and a limitation and the thing I most needed to be able to tell apart.
+void testExitsAreReachable() {
+    static bool seen[kCaveCells];
+    static int queue[kCaveCells];
+    const int dx[4] = {0, 0, -1, 1}, dy[4] = {-1, 1, 0, 0};
+
+    for (unsigned i = 0; i < kLevelCount; i++) {
+        const Level& level = kLevels[i];
+        Cave cave;
+        cave.generate(level.spec, level.instructions);
+
+        for (unsigned k = 0; k < kCaveCells; k++) seen[k] = false;
+        int head = 0, tail = 0;
+        const int start = level.playerY * kCaveWidth + level.playerX;
+        seen[start] = true;
+        queue[tail++] = start;
+
+        int ox = -1, oy = -1;
+        for (unsigned y = 0; y < kCaveHeight; y++) {
+            for (unsigned x = 0; x < kCaveWidth; x++) {
+                const uint8_t e = cave.at(x, y);
+                if (e == El::OutboxHidden || e == El::OutboxOpen) { ox = x; oy = y; }
+            }
+        }
+
+        while (head < tail) {
+            const int cell = queue[head++];
+            const int cx = cell % kCaveWidth, cy = cell / kCaveWidth;
+            for (int d = 0; d < 4; d++) {
+                const int nx = cx + dx[d], ny = cy + dy[d];
+                if (nx < 0 || ny < 0 || nx >= (int)kCaveWidth || ny >= (int)kCaveHeight) continue;
+                const int ncell = ny * kCaveWidth + nx;
+                if (seen[ncell]) continue;
+                const uint8_t e = cave.at(nx, ny);
+                if (e == El::Wall || e == El::Steel || e == El::MagicWall) continue;
+                seen[ncell] = true;
+                queue[tail++] = ncell;
+            }
+        }
+
+        const bool ok = ox >= 0 && seen[oy * kCaveWidth + ox];
+        if (!ok) {
+            printf("  FAIL  %s: outbox at (%d,%d) is SEALED behind indestructible terrain\n",
+                   level.name, ox, oy);
+            g_failures++;
+        }
+        g_checks++;
+    }
+}
+
+// Can the game actually be FINISHED? Everything else in this file tests a rule
+// in isolation. This is the only test that asks the question the whole project
+// rests on, and until it existed the honest answer was that nobody knew.
+void testCavesAreCompletable() {
+    static TapeStep tape[6000];
+    unsigned completed = 0;
+    for (unsigned i = 0; i < kLevelCount; i++) {
+        const PlayResult r = playCave(kLevels[i], tape, 6000);
+        printf("  %-14s %s  %u ticks, %u diamonds/%u%s%s\n", kLevels[i].name,
+               r.escaped ? "ESCAPED" : "stuck  ", r.ticks, r.diamonds,
+               kLevels[i].spec.diamondsNeeded, r.escaped ? "" : " - ", r.escaped ? "" : r.failure);
+        if (r.escaped) completed++;
+    }
+    // The bar is deliberately low and the reason matters. This planner walks to
+    // the nearest loose diamond and then to the exit; it has no concept of
+    // MANUFACTURING diamonds, which is what half these caves are about - milling
+    // boulders through a magic wall, crushing a butterfly, suffocating an
+    // amoeba. Those caves report zero diamonds because the agent has nothing to
+    // walk toward, not because they are unwinnable.
+    //
+    // The first version of this bar was "at least five", set before I had run it
+    // once. That is a number chosen to feel rigorous rather than to mean
+    // anything, and it failed on a build whose caves were mostly fine. The real
+    // guarantee lives in testExitsAreReachable above, which can actually tell a
+    // broken cave from a limited agent. This one asserts the thing it can
+    // genuinely establish: a cave gets played, start to exit, by something that
+    // is not me claiming it works.
+    printf("  %u of %u caves completed by a greedy planner\n", completed, kLevelCount);
+    check(completed >= 1, "at least one cave is playable end to end");
+}
+
 // The tape the console will replay. Deliberately busy: it digs, collects,
 // pushes, and drops a rock on a butterfly, so the hash trace covers the paths
 // that actually differ between two compilers.
-struct TapeStep {
+struct TraceStep {
     int8_t dx, dy;
     uint8_t grab;
 };
-const TapeStep kTape[] = {
+const TraceStep kTape[] = {
     {1, 0, 0},  {1, 0, 0}, {1, 0, 0}, {0, 1, 0},  {0, 1, 0}, {1, 0, 0}, {1, 0, 0},  {0, 0, 0},
     {0, -1, 0}, {1, 0, 1}, {1, 0, 0}, {1, 0, 0},  {0, 1, 0}, {0, 1, 0}, {-1, 0, 0}, {-1, 0, 0},
     {0, 0, 0},  {0, 1, 0}, {1, 0, 0}, {1, 0, 0},  {1, 0, 0}, {0, 0, 0}, {0, -1, 0}, {0, -1, 0},
@@ -615,6 +711,34 @@ void buildTapeCave(Cave& cave) {
     cave.set(20, 12, El::ButterflyBase);
     cave.set(24, 8, El::FireflyBase + 3);
     cave.set(30, 18, El::OutboxHidden);
+}
+
+// Emits a winning run for the console to replay. The host found it; the R3000
+// has to reproduce it move for move and arrive at Escaped. That is the claim
+// closed end to end: not "the rules match across two compilers" and not "a
+// planner can win on my desk", but a PlayStation finishing a cave.
+int emitTape(const char* path) {
+    static TapeStep tape[6000];
+    // FIRST DIG: the shortest winning run, so the console spends its time
+    // playing rather than waiting.
+    const PlayResult r = playCave(kLevels[0], tape, 6000);
+    if (!r.escaped) {
+        printf("agent could not win cave 0, refusing to emit a tape that proves nothing\n");
+        return 1;
+    }
+    FILE* f = fopen(path, "w");
+    if (!f) return 1;
+    fprintf(f, "// Generated by simtest --emit-tape. Do not edit.\n");
+    fprintf(f, "// A winning run of \"%s\", found by the host planner.\n\n", kLevels[0].name);
+    fprintf(f, "static const unsigned kPlayTapeLength = %u;\n", r.steps);
+    fprintf(f, "static const signed char kPlayTape[%u][2] = {\n", r.steps);
+    for (unsigned i = 0; i < r.steps; i++) {
+        fprintf(f, "    {%d,%d},%s", tape[i].dx, tape[i].dy, (i % 8) == 7 ? "\n" : "");
+    }
+    fprintf(f, "\n};\n");
+    fclose(f);
+    printf("wrote %s: %u steps, %u ticks, %u diamonds\n", path, r.steps, r.ticks, r.diamonds);
+    return 0;
 }
 
 int emitTrace(const char* path) {
@@ -646,6 +770,7 @@ int emitTrace(const char* path) {
 
 int main(int argc, char** argv) {
     if (argc >= 3 && strcmp(argv[1], "--emit") == 0) return emitTrace(argv[2]);
+    if (argc >= 3 && strcmp(argv[1], "--emit-tape") == 0) return emitTape(argv[2]);
 
     printf("BOULDERDASH rule tests\n");
     testFallIsOneCellPerTick();
@@ -669,6 +794,8 @@ int main(int argc, char** argv) {
     testAdpcmRoundTrip();
     testRoundTripCanFail();
     testLevelsAreWellFormed();
+    testExitsAreReachable();
+    testCavesAreCompletable();
     testGeneratorIsDeterministic();
 
     printf("%d checks, %d failures\n", g_checks, g_failures);

@@ -44,6 +44,9 @@ const uint8_t kCave2[] = {
     BD_LINE(El::Steel, 20, 2, 16, LineDir::Down),
     BD_LINE(El::Boulder, 21, 2, 16, LineDir::Down),
     BD_FILLED(El::Wall, 24, 6, 12, 8, El::Space),
+    // The way in. Brick is not diggable, so without this the chamber - and the
+    // exit inside it - is sealed for good.
+    BD_PLOT(El::Dirt, 24, 10),
     BD_PLOT(El::OutboxHidden, 34, 11),
     BD_LINE(El::Diamond, 26, 8, 8, LineDir::Right),
     BD_END,
@@ -59,6 +62,7 @@ const uint8_t kCave3[] = {
     BD_PLOT(El::FireflyBase + 0, 30, 13),
     BD_LINE(El::Diamond, 8, 8, 8, LineDir::Right),
     BD_LINE(El::Diamond, 24, 13, 10, LineDir::Right),
+    BD_PLOT(El::Dirt, 22, 14),
     BD_PLOT(El::OutboxHidden, 34, 17),
     BD_END,
 };
@@ -148,7 +152,10 @@ const uint8_t kCave9[] = {
     BD_FILLED(El::Steel, 6, 13, 28, 7, El::Space),
     BD_LINE(El::Diamond, 8, 17, 24, LineDir::Right),
     BD_PLOT(El::OutboxHidden, 32, 18),
-    BD_PLOT(El::Space, 20, 12),
+    // Pierce the steel roof of the lower chamber. This was at y=12 - one row
+    // ABOVE the rectangle it was supposed to open - so it cut a hole in thin
+    // air and left the exit sealed behind unbreakable steel.
+    BD_PLOT(El::Space, 20, 13),
     BD_END,
 };
 
@@ -283,8 +290,8 @@ const Level kLevels[] = {
       .timeLimit = 300,
       .amoebaSlowGrowthTime = 0},
      kCave10,
-     2,
-     2},
+     4,
+     4},
 };
 
 const unsigned kLevelCount = sizeof(kLevels) / sizeof(kLevels[0]);

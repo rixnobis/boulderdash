@@ -1,6 +1,6 @@
 TARGET = boulderdash-selftest
 TYPE = ps-exe
-SRCS = selftest.cpp cave.cpp
+SRCS = selftest.cpp cave.cpp levels.cpp
 CXXFLAGS = -std=c++20
 PSYQO_ROOT ?= third_party/nugget
 include $(PSYQO_ROOT)/psyqo/psyqo.mk
