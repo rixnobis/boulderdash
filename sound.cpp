@@ -166,9 +166,18 @@ unsigned encodeAdpcm(const int16_t* pcm, unsigned count, uint8_t* out) {
             shift--;
         }
 
+        // Flag bits, and this pair is a trap. Bit0 is Loop End, bit1 is Loop
+        // Repeat, and the encoding is by COMBINATION, not by independent
+        // meaning: bit0 alone is Code 1, End+Mute, which is what a one-shot
+        // effect wants. Bit0 AND bit1 is Code 3, End+REPEAT - it sets ENDX and
+        // then jumps straight back to the loop address. The first version here
+        // set both and carried a comment saying "stop rather than loop", which
+        // is the sort of claim a comment cannot make good on. Every effect would
+        // have looped forever, and the ENDX bit would still have come up set,
+        // so the playback oracle would have reported success.
         uint8_t flags = 0;
-        if (b == 0) flags |= 0x04;                 // start of the sample
-        if (b == blocks - 1) flags |= 0x01 | 0x02;  // end, and stop rather than loop
+        if (b == 0) flags |= 0x04;         // Loop Start: records the loop address
+        if (b == blocks - 1) flags |= 0x01;  // Code 1, End+Mute
 
         out[written++] = static_cast<uint8_t>(shift & 0x0F);  // filter 0 in the high nibble
         out[written++] = flags;

@@ -472,7 +472,12 @@ void testAdpcmRoundTrip() {
         // Flags: the SPU needs the first block marked as a start and the last as
         // an end, or it plays into whatever happens to sit after it in SPU RAM.
         check((adpcm[1] & 0x04) != 0, "first block is flagged as the sample start");
-        check((adpcm[bytes - kAdpcmBlockBytes + 1] & 0x01) != 0, "last block is flagged as the end");
+        // Exact value, not a bit test. `& 0x01` passes for both End+Mute (1)
+        // and End+Repeat (3), and those are opposite behaviours - the second
+        // loops the effect forever. A mask that cannot distinguish the two is
+        // not a check on the thing that matters.
+        check(adpcm[bytes - kAdpcmBlockBytes + 1] == 0x01,
+              "last block is End+Mute (code 1), NOT End+Repeat (code 3)");
     }
 }
 

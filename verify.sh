@@ -5,7 +5,8 @@
 #   2. build           - game and selftest, from clean objects
 #   3. differential    - an R3000 replays the same tape and must reproduce
 #                        every per-tick hash the host produced
-#   4. render          - the game boots and draws real content
+#   4. audio           - the SPU actually goes live on each effect
+#   5. render          - the game boots and draws real content
 #
 # Gate 4 grades on the colour histogram. `curl` exits 0 while writing a 0x0
 # file, and the still endpoint serves a valid PNG of an entirely blank frame
@@ -24,30 +25,43 @@ BIOS=${BIOS:-/home/pixel/sources/pcsx-redux/src/mips/openbios/openbios.bin}
 FAIL=0
 step() { echo; echo "=== $* ==="; }
 
-step "1/4 host rules"
-g++ -std=c++20 -O2 -Wall -o simtest simtest.cpp cave.cpp levels.cpp || { echo "host build FAILED"; exit 1; }
+step "1/5 host rules"
+g++ -std=c++20 -O2 -Wall -o simtest simtest.cpp cave.cpp levels.cpp sound.cpp || { echo "host build FAILED"; exit 1; }
 ./simtest || FAIL=1
 ./simtest --emit trace.inc || FAIL=1
 
-step "2/4 build"
+step "2/5 build"
 rm -f ./*.o ./*.dep
 make -j"$(nproc)" >/dev/null 2>&1 || { echo "game build FAILED"; exit 1; }
 rm -f ./*.o ./*.dep
 make -f Makefile.selftest -j"$(nproc)" >/dev/null 2>&1 || { echo "selftest build FAILED"; exit 1; }
+rm -f ./*.o ./*.dep
+make -f Makefile.soundtest -j"$(nproc)" >/dev/null 2>&1 || { echo "soundtest build FAILED"; exit 1; }
 rm -f ./*.o ./*.dep
 make -j"$(nproc)" >/dev/null 2>&1 || { echo "game rebuild FAILED"; exit 1; }
 for f in boulderdash.ps-exe boulderdash-selftest.ps-exe; do
     echo "  $f  $(stat -c %s "$f") bytes  $(date -u -d @"$(stat -c %Y "$f")" -Iseconds)"
 done
 
-step "3/4 host vs R3000 differential"
+step "3/5 host vs R3000 differential"
 timeout 90 "$REDUX" -no-ui -run -stdout -testmode -interpreter -bios "$BIOS" \
     -loadexe boulderdash-selftest.ps-exe 2>&1 | grep -aE "BOULDERDASH|FAIL|ticks simulated|matches"
 SELFTEST=${PIPESTATUS[0]}
 echo "  exit=$SELFTEST"
 [ "$SELFTEST" -eq 0 ] || FAIL=1
 
-step "4/4 render"
+step "4/5 audio"
+# Reads the per-voice ADSR envelope, which this emulator implements. The ENDX
+# status register would be the right instrument on silicon and is not modelled
+# here - it reads back as whatever was last written, so it reports every sample
+# as never having played. The control inside the test is what catches that.
+timeout 90 "$REDUX" -no-ui -run -stdout -testmode -interpreter -bios "$BIOS" \
+    -loadexe boulderdash-soundtest.ps-exe 2>&1 | grep -aE "BOULDERDASH|sfx |control|FAIL"
+SOUND=${PIPESTATUS[0]}
+echo "  exit=$SOUND"
+[ "$SOUND" -eq 0 ] || FAIL=1
+
+step "5/5 render"
 xvfb-run -a "$REDUX" -run -stdout -webserver -webserver-port 8299 -interpreter \
     -bios "$BIOS" -loadexe "$PWD/boulderdash.ps-exe" > /tmp/bd-verify.log 2>&1 &
 LAUNCH=$!
