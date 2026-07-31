@@ -553,22 +553,29 @@ void testLevelsAreWellFormed() {
         // boulders into diamonds one for one. An amoeba that suffocates becomes
         // diamonds wholesale, which this cannot bound at all - it is credited as
         // sufficient and that is the weakest link in the whole test.
-        int supply = diamonds + butterflies * 6;
-        const char* source = "loose diamonds";
-        if (supply < level.spec.diamondsNeeded && magicWall) {
-            supply += boulders;
-            source = "loose diamonds + magic wall milling boulders";
-        }
-        if (supply < level.spec.diamondsNeeded && amoeba) {
-            supply = level.spec.diamondsNeeded;
-            source = "an amoeba that must be made to suffocate (UNBOUNDED, uncheckable)";
-        }
+        // Break the sources out rather than summing them under one label. The
+        // first version added butterflies into the total and still printed
+        // "loose diamonds", and I read that line, believed a cave's diamonds
+        // came from the fill when they came from its butterflies, and "fixed" a
+        // cave that was not broken. A report that hides which term carried the
+        // sum is a report that will be misread, and the author is first in line.
+        int supply = diamonds;
+        const int fromButterflies = butterflies * 6;
+        const int fromMill = magicWall ? boulders : 0;
+        supply += fromButterflies + fromMill;
+        const bool needsAmoeba = supply < level.spec.diamondsNeeded && amoeba;
+        if (needsAmoeba) supply = level.spec.diamondsNeeded;
+
         if (supply < level.spec.diamondsNeeded) {
             printf("  FAIL  %s: %d available, needs %u\n", level.name, supply,
                    level.spec.diamondsNeeded);
             g_failures++;
         } else {
-            printf("  %-16s quota %2u from %s\n", level.name, level.spec.diamondsNeeded, source);
+            printf("  %-14s needs %2u: %3d loose", level.name, level.spec.diamondsNeeded, diamonds);
+            if (fromButterflies) printf(" + %d from %d butterflies", fromButterflies, butterflies);
+            if (fromMill) printf(" + up to %d milled", fromMill);
+            if (needsAmoeba) printf(" + AMOEBA (unbounded, uncheckable)");
+            printf("\n");
         }
         g_checks++;
         check(outboxes == 1, level.name);

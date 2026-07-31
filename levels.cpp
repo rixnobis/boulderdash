@@ -105,6 +105,67 @@ const uint8_t kCave6[] = {
     BD_END,
 };
 
+// 7. Two magic walls fed from one shaft, and the diamonds you need are on the
+//    wrong side of a rock wall you have to push through. The timer is shared
+//    across both walls, so committing to one commits to both.
+const uint8_t kCave7[] = {
+    BD_LINE(El::MagicWall, 6, 9, 8, LineDir::Right),
+    BD_LINE(El::MagicWall, 24, 9, 8, LineDir::Right),
+    BD_FILLED(El::Steel, 5, 10, 10, 6, El::Space),
+    BD_FILLED(El::Steel, 23, 10, 10, 6, El::Space),
+    BD_LINE(El::Space, 6, 4, 8, LineDir::Right),
+    BD_LINE(El::Space, 24, 4, 8, LineDir::Right),
+    BD_LINE(El::Boulder, 6, 3, 8, LineDir::Right),
+    BD_LINE(El::Boulder, 24, 3, 8, LineDir::Right),
+    BD_PLOT(El::OutboxHidden, 19, 20),
+    BD_END,
+};
+
+// 8. A firefly nest sealed behind brick, and butterflies in the open. The
+//    fireflies are worth nothing and will kill you; the butterflies are the
+//    entire quota. Everything about this cave is deciding which to disturb.
+const uint8_t kCave8[] = {
+    BD_RECT(El::Wall, 4, 3, 10, 8),
+    BD_PLOT(El::FireflyBase + 3, 6, 5),
+    BD_PLOT(El::FireflyBase + 1, 11, 8),
+    BD_PLOT(El::FireflyBase + 0, 8, 6),
+    BD_FILLED(El::Steel, 20, 6, 16, 3, El::Space),
+    BD_LINE(El::Boulder, 21, 5, 14, LineDir::Right),
+    BD_PLOT(El::ButterflyBase + 1, 23, 7),
+    BD_PLOT(El::ButterflyBase + 3, 28, 7),
+    BD_PLOT(El::ButterflyBase + 1, 33, 7),
+    BD_PLOT(El::OutboxHidden, 37, 20),
+    BD_END,
+};
+
+// 9. Amoeba above, exit below, and a rock floor between them. The amoeba will
+//    reach two hundred cells and turn to boulders long before you can seal it,
+//    so the intended answer is to let it - and be somewhere else when it does.
+const uint8_t kCave9[] = {
+    BD_FILLED(El::Steel, 8, 2, 24, 8, El::Space),
+    BD_PLOT(El::Amoeba, 20, 5),
+    BD_LINE(El::Boulder, 9, 10, 22, LineDir::Right),
+    BD_FILLED(El::Steel, 6, 13, 28, 7, El::Space),
+    BD_LINE(El::Diamond, 8, 17, 24, LineDir::Right),
+    BD_PLOT(El::OutboxHidden, 32, 18),
+    BD_PLOT(El::Space, 20, 12),
+    BD_END,
+};
+
+// 10. No dirt at all. Every cell is rock, diamond or air, so nothing can be
+//     tunnelled and the only tool left is which rock you push and when.
+const uint8_t kCave10[] = {
+    BD_FILLED(El::Steel, 2, 2, 36, 18, El::Space),
+    BD_LINE(El::Boulder, 4, 6, 32, LineDir::Right),
+    BD_LINE(El::Boulder, 4, 11, 32, LineDir::Right),
+    BD_LINE(El::Boulder, 4, 16, 32, LineDir::Right),
+    BD_LINE(El::Diamond, 6, 5, 6, LineDir::Right),
+    BD_LINE(El::Diamond, 24, 10, 8, LineDir::Right),
+    BD_LINE(El::Diamond, 10, 15, 8, LineDir::Right),
+    BD_PLOT(El::OutboxHidden, 36, 18),
+    BD_END,
+};
+
 }  // namespace
 
 const Level kLevels[] = {
@@ -172,6 +233,56 @@ const Level kLevels[] = {
       .timeLimit = 240,
       .amoebaSlowGrowthTime = 120},
      kCave6,
+     2,
+     2},
+    {"TWIN MILLS",
+     {.randomSeed = 0x9A,
+      .fillObject = {El::Boulder, El::Dirt, El::Dirt, El::Dirt},
+      .fillProbability = {0x26, 0, 0, 0},
+      .diamondsNeeded = 14,
+      .magicWallMillingTime = 70,
+      .timeLimit = 240,
+      .amoebaSlowGrowthTime = 0},
+     kCave7,
+     2,
+     2},
+    // No diamonds in the fill: the butterflies really are the entire quota,
+    // three of them at roughly six diamonds each. The first version seeded
+    // diamonds at 0x06 and the validity check reported the quota as met from
+    // loose diamonds alone - which meant the cave's own comment was a lie and
+    // the butterflies were decoration. Worth having a check that reads the
+    // design rather than only the arithmetic.
+    {"NEST",
+     {.randomSeed = 0xB3,
+      .fillObject = {El::Boulder, El::Dirt, El::Dirt, El::Dirt},
+      .fillProbability = {0x1C, 0, 0, 0},
+      .diamondsNeeded = 15,
+      .magicWallMillingTime = 0,
+      .timeLimit = 260,
+      .amoebaSlowGrowthTime = 0},
+     kCave8,
+     2,
+     2},
+    {"BLOOM",
+     {.randomSeed = 0xC7,
+      .fillObject = {El::Boulder, El::Dirt, El::Dirt, El::Dirt},
+      .fillProbability = {0x1A, 0, 0, 0},
+      .diamondsNeeded = 20,
+      .magicWallMillingTime = 0,
+      .timeLimit = 280,
+      .amoebaSlowGrowthTime = 200},
+     kCave9,
+     2,
+     2},
+    {"NO DIRT",
+     {.randomSeed = 0xE1,
+      .fillObject = {El::Space, El::Boulder, El::Diamond, El::Dirt},
+      .fillProbability = {0xFF, 0x30, 0x08, 0},
+      .diamondsNeeded = 16,
+      .magicWallMillingTime = 0,
+      .timeLimit = 300,
+      .amoebaSlowGrowthTime = 0},
+     kCave10,
      2,
      2},
 };
