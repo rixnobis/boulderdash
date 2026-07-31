@@ -37,10 +37,18 @@ SOFTWARE.
 
 #include "cave.hh"
 #include "levels.hh"
+#include "sound.hh"
 
 using namespace bd;
 
 namespace {
+
+int64_t isqrt(int64_t v) {
+    if (v <= 0) return 0;
+    int64_t x = v, y = (x + 1) / 2;
+    while (y < x) { x = y; y = (x + v / x) / 2; }
+    return x;
+}
 
 int g_failures = 0;
 int g_checks = 0;
@@ -414,6 +422,93 @@ void testGeneratorIsDeterministic() {
     (void)s1;
 }
 
+// Audio. The point of synthesising and encoding on the console rather than
+// shipping sample files is that the whole chain becomes checkable HERE - my
+// ears are not attached to this machine and the emulator's audio does not come
+// back through a screenshot, so "it made a noise" was never available as a
+// standard.
+void testAdpcmRoundTrip() {
+    static int16_t pcm[kMaxSamples];
+    static int16_t back[kMaxSamples];
+    static uint8_t adpcm[kMaxBlocks * kAdpcmBlockBytes];
+
+    for (unsigned s = 0; s < kSfxCount; s++) {
+        const Sfx sfx = static_cast<Sfx>(s);
+        const unsigned count = renderSfx(sfx, pcm);
+        check(count > 0 && count % kSamplesPerBlock == 0, "effect length is a whole number of blocks");
+        check(count <= kMaxSamples, "effect fits the buffer");
+
+        // The waveform must actually be a waveform. A synth bug that emits
+        // silence would sail through every error measurement below, because
+        // silence encodes and decodes perfectly.
+        int32_t peak = 0;
+        for (unsigned i = 0; i < count; i++) {
+            int32_t v = pcm[i] < 0 ? -pcm[i] : pcm[i];
+            if (v > peak) peak = v;
+        }
+        check(peak > 2000, "the effect is audible rather than silence");
+
+        const unsigned bytes = encodeAdpcm(pcm, count, adpcm);
+        check(bytes == (count / kSamplesPerBlock) * kAdpcmBlockBytes, "encoded size is exact");
+
+        const unsigned produced = decodeAdpcm(adpcm, bytes, back);
+        check(produced == count, "decode returns as many samples as went in");
+
+        // Error relative to the peak. Four bits and a per-block shift cannot do
+        // better than a few percent and are not meant to; what this catches is a
+        // shift convention that is off by one, which shows up as either gross
+        // clipping or a signal 16x too quiet, both of which blow past this bar.
+        int64_t sumSq = 0;
+        for (unsigned i = 0; i < count; i++) {
+            const int64_t d = static_cast<int64_t>(pcm[i]) - back[i];
+            sumSq += d * d;
+        }
+        const int32_t rms = static_cast<int32_t>(isqrt(sumSq / count));
+        const int32_t pct = peak > 0 ? (rms * 100) / peak : 0;
+        printf("  sfx %u: %4u samples, peak %5d, rms error %4d (%d%% of peak)\n", s, count, peak,
+               rms, pct);
+        check(pct < 12, "round trip stays within a few percent of peak");
+
+        // Flags: the SPU needs the first block marked as a start and the last as
+        // an end, or it plays into whatever happens to sit after it in SPU RAM.
+        check((adpcm[1] & 0x04) != 0, "first block is flagged as the sample start");
+        check((adpcm[bytes - kAdpcmBlockBytes + 1] & 0x01) != 0, "last block is flagged as the end");
+    }
+}
+
+// A negative control for the round trip. If the decoder ignored the per-block
+// shift - the single most likely way to get this wrong - the error would be
+// enormous, so the test above must be able to SEE that. Grading an encoder
+// against its own inverse is the trap this whole arrangement exists to avoid,
+// and a round-trip test that cannot fail is exactly that trap with more steps.
+void testRoundTripCanFail() {
+    static int16_t pcm[kMaxSamples];
+    static int16_t back[kMaxSamples];
+    static uint8_t adpcm[kMaxBlocks * kAdpcmBlockBytes];
+    const unsigned count = renderSfx(Sfx::Collect, pcm);
+    const unsigned bytes = encodeAdpcm(pcm, count, adpcm);
+
+    // Corrupt every block's shift by one and re-decode with the real decoder.
+    for (unsigned b = 0; b < bytes / kAdpcmBlockBytes; b++) {
+        uint8_t& hdr = adpcm[b * kAdpcmBlockBytes];
+        hdr = static_cast<uint8_t>((hdr & 0x0F) > 0 ? (hdr & 0x0F) - 1 : 1);
+    }
+    decodeAdpcm(adpcm, bytes, back);
+
+    int64_t sumSq = 0;
+    int32_t peak = 0;
+    for (unsigned i = 0; i < count; i++) {
+        const int64_t d = static_cast<int64_t>(pcm[i]) - back[i];
+        sumSq += d * d;
+        const int32_t v = pcm[i] < 0 ? -pcm[i] : pcm[i];
+        if (v > peak) peak = v;
+    }
+    const int32_t rms = static_cast<int32_t>(isqrt(sumSq / count));
+    const int32_t pct = (rms * 100) / peak;
+    printf("  shift off by one: rms error %d%% of peak\n", pct);
+    check(pct >= 12, "a one-off shift IS detected, so the pass above means something");
+}
+
 // Cave validity. NECESSARY, not sufficient, and saying so matters: a full
 // solvability proof for Boulder Dash is a search over a state space with a
 // probabilistic push in it, which is not OVERDRAW's tractable n! and I am not
@@ -559,6 +654,8 @@ int main(int argc, char** argv) {
     testMagicWallTransmutes();
     testRestingBoulderDoesNotActivateMagicWall();
     testExpiredMagicWallEatsEverything();
+    testAdpcmRoundTrip();
+    testRoundTripCanFail();
     testLevelsAreWellFormed();
     testGeneratorIsDeterministic();
 

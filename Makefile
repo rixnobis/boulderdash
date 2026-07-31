@@ -6,6 +6,7 @@ main.cpp \
 tiles.cpp \
 cave.cpp \
 levels.cpp \
+sound.cpp \
 
 CXXFLAGS = -std=c++20
 

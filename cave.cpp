@@ -176,6 +176,7 @@ void Cave::generate(const CaveSpec& spec, const uint8_t* instructions) {
     m_magicWallState = 0;
     m_magicWallTimer = 0;
     m_magicWallMillingTime = spec.magicWallMillingTime;
+    m_events = 0;
 }
 
 // ---------------------------------------------------------------------- rules
@@ -188,6 +189,7 @@ bool Cave::slippery(uint8_t e) const {
 }
 
 void Cave::explode(unsigned x, unsigned y, bool toDiamonds) {
+    m_events |= Ev::Exploded;
     const uint8_t stage0 = toDiamonds ? El::ExplodeToDiamond : El::ExplodeToSpace;
     for (int oy = -1; oy <= 1; oy++) {
         for (int ox = -1; ox <= 1; ox++) {
@@ -274,6 +276,9 @@ void Cave::processBoulderish(unsigned x, unsigned y, bool falling, bool isDiamon
         }
     }
 
+    // A falling object coming to rest is the thud. A resting one that stays
+    // resting is not, or the cave would clatter continuously.
+    if (falling) m_events |= Ev::Landed;
     set(x, y, restingScanned);
 }
 
@@ -363,6 +368,7 @@ void Cave::processPlayer(unsigned x, unsigned y, const Input& in) {
             break;
         case El::Dirt:
             set(tx, ty, El::Space);
+            m_events |= Ev::Dug;
             move = true;
             break;
         case El::Diamond:
@@ -372,6 +378,7 @@ void Cave::processPlayer(unsigned x, unsigned y, const Input& in) {
             // Collectable in mid-fall, which is a real technique and not an
             // accident of the code.
             set(tx, ty, El::Space);
+            m_events |= Ev::Collected;
             m_diamonds++;
             if (m_diamonds >= m_diamondsNeeded) m_exitOpen = true;
             move = true;
@@ -542,6 +549,7 @@ void Cave::tick(const Input& in) {
     // Only an escape ends the simulation, because at that point the player is
     // no longer in the grid to simulate.
     if (m_status == Status::Escaped) return;
+    m_events = 0;
 
     // Row-major, top to bottom, left to right. Everything about how this game
     // feels comes out of that one line. A rock that falls into a cell the scan
@@ -595,6 +603,7 @@ uint32_t Cave::hash() const {
     mix(static_cast<uint8_t>(m_exitOpen ? 1 : 0));
     mix(m_rngA);
     mix(m_rngB);
+    mix(m_events);
     mix(m_amoebaVerdict);
     mix(m_magicWallState);
     mix(static_cast<uint8_t>(m_magicWallTimer));

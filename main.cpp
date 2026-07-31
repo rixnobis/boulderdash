@@ -42,11 +42,13 @@ SOFTWARE.
 #include "psyqo/primitives/sprites.hh"
 #include "psyqo/scene.hh"
 #include "psyqo/simplepad.hh"
+#include "psyqo/spu.hh"
 
 #include "common/syscalls/syscalls.h"
 
 #include "cave.hh"
 #include "levels.hh"
+#include "sound.hh"
 #include "tiles.hh"
 
 using namespace bd;
@@ -101,6 +103,44 @@ TileId tileFor(uint8_t element, uint8_t magicWallState) {
     if (element >= El::ButterflyBase && element <= El::ButterflyScanned + 3) return TileId::Butterfly;
     if (element >= El::ExplodeToSpace && element <= El::ExplodeToDiamond + 4) return TileId::Explosion;
     return TileId::Space;
+}
+
+// Where each effect lives in SPU RAM. The first 0x1000 is the SPU's own
+// reserved region, and psyqo's BASE_ALLOC_ADDR is the first address a program
+// may use; effects are laid end to end from there at boot.
+uint16_t g_sfxAddress[kSfxCount];
+
+void uploadSounds() {
+    psyqo::SPU::initialize();
+    // These two buffers are large and used exactly once, at boot. Static rather
+    // than stack because the psyqo stack is not where you put six kilobytes.
+    static int16_t pcm[kMaxSamples];
+    static uint8_t adpcm[kMaxBlocks * kAdpcmBlockBytes];
+
+    uint16_t addr = psyqo::SPU::BASE_ALLOC_ADDR;
+    for (unsigned i = 0; i < kSfxCount; i++) {
+        const unsigned count = renderSfx(static_cast<Sfx>(i), pcm);
+        const unsigned bytes = encodeAdpcm(pcm, count, adpcm);
+        g_sfxAddress[i] = addr;
+        psyqo::SPU::dmaWrite(addr, adpcm, static_cast<uint16_t>(bytes), 16);
+        ramsyscall_printf("sfx %u: %u samples -> %u bytes at spu 0x%04x\n", i, count, bytes, addr);
+        addr = static_cast<uint16_t>(addr + bytes);
+    }
+}
+
+void playSfx(Sfx sfx, uint16_t volume) {
+    const uint32_t channel = psyqo::SPU::getNextFreeChannel();
+    if (channel == psyqo::SPU::NO_FREE_CHANNEL) return;
+    psyqo::SPU::ChannelPlaybackConfig config;
+    // The effects were synthesised as though they play at 22050Hz, which is half
+    // the SPU's base rate, so the pitch is 0.5 in the hardware's 12-bit fixed
+    // point rather than 1.0. Getting this wrong is not subtle - it is an octave.
+    config.sampleRate = psyqo::FixedPoint<12, uint16_t>(0, 2048);
+    config.volumeLeft = volume;
+    config.volumeRight = volume;
+    config.adsr = 0x1fc080ff;
+    psyqo::SPU::playADPCM(static_cast<uint8_t>(channel), g_sfxAddress[static_cast<unsigned>(sfx)],
+                          config, false);
 }
 
 class Viewer final : public psyqo::Application {
@@ -175,6 +215,8 @@ void Viewer::createScene() {
     packClut(clut);
     gpu().uploadToVRAM(clut,
                        {.pos = {{.x = kClutVramX, .y = kClutVramY}}, .size = {{.w = 16, .h = 1}}});
+
+    uploadSounds();
 
     ramsyscall_printf("createScene done, pushing\n");
     pushScene(&g_sheetScene);
@@ -283,6 +325,20 @@ void SheetScene::frame() {
         else if (padState.isButtonPressed(pad, psyqo::SimplePad::Button::Down)) in.dy = 1;
         in.grab = padState.isButtonPressed(pad, psyqo::SimplePad::Button::Cross);
         m_cave.tick(in);
+
+        // One sound per event class per tick. An explosion covers everything
+        // else that happened in the same scan, because a blast that also
+        // dislodged four rocks should read as one event, not five.
+        const uint8_t events = m_cave.events();
+        if (events & Ev::Exploded) {
+            playSfx(Sfx::Explode, 0x2800);
+        } else if (events & Ev::Collected) {
+            playSfx(Sfx::Collect, 0x2000);
+        } else if (events & Ev::Landed) {
+            playSfx(Sfx::Thud, 0x1800);
+        } else if (events & Ev::Dug) {
+            playSfx(Sfx::Dig, 0x1400);
+        }
 
         // Follow the player, clamped. Searching the grid for him each tick is
         // wasteful and completely invisible at this scale.

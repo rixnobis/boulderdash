@@ -97,6 +97,19 @@ struct Input {
     bool grab = false;  // fire: act in that direction without vacating the cell
 };
 
+// What happened during the last tick. Derived rather than stored, but hashed
+// with everything else: the grid already covers the CAUSES, and hashing the
+// events as well means a divergence in the event logic itself cannot hide
+// behind a grid that happens to match.
+namespace Ev {
+enum : uint8_t {
+    Dug = 1 << 0,
+    Collected = 1 << 1,
+    Landed = 1 << 2,
+    Exploded = 1 << 3,
+};
+}  // namespace Ev
+
 enum class Status : uint8_t {
     Playing,
     Dead,
@@ -135,6 +148,7 @@ class Cave {
     bool exitOpen() const { return m_exitOpen; }
     uint16_t amoebaCount() const { return m_amoebaCount; }
     uint8_t magicWallState() const { return m_magicWallState; }
+    uint8_t events() const { return m_events; }
 
     // FNV-1a over the whole grid plus the scalar state. This is what the host
     // and the console compare, so it has to cover everything a divergence could
@@ -181,6 +195,7 @@ class Cave {
     uint16_t m_magicWallTimer = 0;
     uint16_t m_magicWallMillingTime = 0;
     uint8_t m_amoebaSlowGrowthTime = 0;
+    uint8_t m_events = 0;
 };
 
 }  // namespace bd

@@ -174,25 +174,31 @@ const char kTileArt[kTileCount][kTileSize][kTileSize + 1] = {
         ".......aa.......",
         "................",
     },
-    // Player. Outlined in black, because at 16x16 on a brown field a
-    // light-grey figure has no silhouette and simply dissolves.
+    // Player. Fourth pass, and the earlier three are the reason this one works.
+    // A light-grey blob with no outline dissolved into the dirt. An outline
+    // with no internal structure read as a white smudge with two dots. A pale
+    // head over a mid-grey body still failed, because the body value sat almost
+    // on top of the outline value and the whole torso read as shadow. What
+    // carries a figure at 16x16 is contrast INSIDE the sprite: pale head, light
+    // body, a darker edge down one side to give it a light source. The eyes are
+    // the only red on the screen, so they take the gaze without being large.
     {
         "................",
+        "...1111111111...",
+        "..199999999991..",
+        "..191199991191..",
+        "..19e199991e91..",
+        "..199999999991..",
+        "..199999999991..",
+        "...1999999991...",
         "....11111111....",
-        "...199999991....",
-        "..19999999991...",
-        "..1ee99999ee1...",
-        "..1ee99999ee1...",
-        "..19999999991...",
-        "..11999999911...",
-        "...199999991....",
-        "....1999991.....",
-        "...19999991.....",
-        "..1999999991....",
-        "..1999999991....",
-        "..11111111111...",
-        "...1991..1991...",
-        "...1991..1991...",
+        "...1888888871...",
+        "..188888888771..",
+        "..188888888771..",
+        "..188888888771..",
+        "...1888887771...",
+        "....18....71....",
+        "....11....11....",
     },
     // Firefly. Angular and hot: it has to read as hostile at a glance, next to a
     // diamond that is also small and also bright. Shape carries that, not colour
