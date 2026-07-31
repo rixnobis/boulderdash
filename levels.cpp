@@ -86,9 +86,16 @@ const uint8_t kCave4[] = {
 //    the cave is really about getting the shaft ready before you commit.
 const uint8_t kCave5[] = {
     BD_LINE(El::MagicWall, 14, 12, 12, LineDir::Right),
-    BD_FILLED(El::Steel, 13, 13, 14, 6, El::Space),
-    BD_LINE(El::Space, 14, 4, 12, LineDir::Right),
-    BD_LINE(El::Space, 14, 5, 12, LineDir::Right),
+    // The catch basin must be OPEN at the row directly under the wall. A milled
+    // object emerges two cells below the boulder that fed it - never inside the
+    // wall - so a steel roof one row down is exactly where every diamond
+    // materialises and is destroyed. The first version had that roof, and the
+    // cave produced zero diamonds while looking like a magic-wall bug.
+    BD_FILLED(El::Space, 13, 13, 14, 6, El::Space),
+    // The shaft has to reach the wall. The first version cleared two rows and
+    // the boulders came to rest on fill dirt seven rows short of the mill, so
+    // the cave produced nothing at all and looked like a magic-wall bug.
+    BD_FILLED(El::Space, 14, 4, 12, 8, El::Space),
     BD_LINE(El::Boulder, 14, 3, 12, LineDir::Right),
     BD_LINE(El::Steel, 13, 3, 9, LineDir::Down),
     BD_LINE(El::Steel, 26, 3, 9, LineDir::Down),
@@ -96,14 +103,21 @@ const uint8_t kCave5[] = {
     BD_END,
 };
 
-// 6. The amoeba, in a room with one narrow vent. Leave it sealed and it becomes
-//    diamonds; let it out and it becomes your problem.
+// 6. The amoeba loose in the cave, and a race. The quota is in loose diamonds;
+//    the amoeba is purely the clock. It will pass two hundred cells and turn the
+//    place to boulders, and you want to be somewhere else when it does.
+//
+//    This cave began as a sealed room and the premise did not survive contact
+//    with the rules. An amoeba grows into dirt as readily as into space, so only
+//    indestructible terrain contains it - and terrain that contains the amoeba
+//    also contains the diamonds it suffocates into. Any vent large enough to let
+//    the player in lets the amoeba out, whereupon it exceeds two hundred cells
+//    and becomes boulders instead. There was no version of the original idea
+//    that could be won; it was not a layout bug.
 const uint8_t kCave6[] = {
-    BD_RECT(El::Steel, 10, 6, 14, 10),
-    BD_FILLED(El::Steel, 11, 7, 12, 8, El::Space),
-    BD_PLOT(El::Amoeba, 16, 11),
-    BD_PLOT(El::Space, 23, 10),
-    BD_PLOT(El::Space, 24, 10),
+    BD_PLOT(El::Amoeba, 20, 4),
+    BD_LINE(El::Diamond, 6, 16, 12, LineDir::Right),
+    BD_LINE(El::Diamond, 24, 18, 10, LineDir::Right),
     BD_LINE(El::Boulder, 26, 4, 10, LineDir::Right),
     BD_PLOT(El::OutboxHidden, 37, 20),
     BD_END,
@@ -115,10 +129,10 @@ const uint8_t kCave6[] = {
 const uint8_t kCave7[] = {
     BD_LINE(El::MagicWall, 6, 9, 8, LineDir::Right),
     BD_LINE(El::MagicWall, 24, 9, 8, LineDir::Right),
-    BD_FILLED(El::Steel, 5, 10, 10, 6, El::Space),
-    BD_FILLED(El::Steel, 23, 10, 10, 6, El::Space),
-    BD_LINE(El::Space, 6, 4, 8, LineDir::Right),
-    BD_LINE(El::Space, 24, 4, 8, LineDir::Right),
+    BD_FILLED(El::Space, 5, 10, 10, 6, El::Space),
+    BD_FILLED(El::Space, 23, 10, 10, 6, El::Space),
+    BD_FILLED(El::Space, 6, 4, 8, 5, El::Space),
+    BD_FILLED(El::Space, 24, 4, 8, 5, El::Space),
     BD_LINE(El::Boulder, 6, 3, 8, LineDir::Right),
     BD_LINE(El::Boulder, 24, 3, 8, LineDir::Right),
     BD_PLOT(El::OutboxHidden, 19, 20),
@@ -134,6 +148,10 @@ const uint8_t kCave8[] = {
     BD_PLOT(El::FireflyBase + 1, 11, 8),
     BD_PLOT(El::FireflyBase + 0, 8, 6),
     BD_FILLED(El::Steel, 20, 6, 16, 3, El::Space),
+    // A way in to the butterflies. They ARE the quota here, and the first
+    // version had them sealed behind steel - the cave was unwinnable and the
+    // exit-reachability gate could not see it, because the EXIT was fine.
+    BD_PLOT(El::Space, 20, 7),
     BD_LINE(El::Boulder, 21, 5, 14, LineDir::Right),
     BD_PLOT(El::ButterflyBase + 1, 23, 7),
     BD_PLOT(El::ButterflyBase + 3, 28, 7),
@@ -231,7 +249,7 @@ const Level kLevels[] = {
      kCave5,
      2,
      2},
-    {"SEALED ROOM",
+    {"THE BLOOM CLOCK",
      {.randomSeed = 0x82,
       .fillObject = {El::Boulder, El::Dirt, El::Dirt, El::Dirt},
       .fillProbability = {0x1E, 0, 0, 0},

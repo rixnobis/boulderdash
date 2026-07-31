@@ -652,6 +652,88 @@ void testExitsAreReachable() {
     }
 }
 
+// The exit-reachability gate above asks whether the player can get OUT. It says
+// nothing about whether the player can get to the DIAMONDS, and that hole hid
+// four more dead caves behind a set of green ticks.
+//
+// So: let the cave settle with no input - rocks fall, mills run, amoebas grow
+// and resolve - and only THEN flood fill and count what is actually within
+// reach. Settling first is the whole trick, because half of what a cave will
+// contain does not exist at tick zero.
+//
+// What it caught: two magic-wall caves producing literally nothing, because a
+// milled object emerges two cells below the wall and I had put the steel roof
+// of the catch basin on exactly that row, so every diamond materialised inside
+// solid steel and was destroyed. One cave whose butterflies - the entire quota -
+// were sealed in a steel box. And one whose amoeba suffocated into sixty
+// diamonds that nothing could ever reach.
+void testSupplyIsReachable() {
+    static bool seen[kCaveCells];
+    static int queue[kCaveCells];
+    const int dx[4] = {0, 0, -1, 1}, dy[4] = {-1, 1, 0, 0};
+
+    for (unsigned i = 0; i < kLevelCount; i++) {
+        const Level& level = kLevels[i];
+        Cave cave;
+        cave.generate(level.spec, level.instructions);
+        cave.placePlayer(level.playerX, level.playerY);
+        for (int t = 0; t < 300; t++) cave.tick({});
+
+        int px = -1, py = -1;
+        for (unsigned y = 0; y < kCaveHeight; y++) {
+            for (unsigned x = 0; x < kCaveWidth; x++) {
+                const uint8_t e = cave.at(x, y);
+                if (e == El::Player || e == El::PlayerScanned) { px = x; py = y; }
+            }
+        }
+        // The player surviving 300 idle ticks is itself worth asserting: a cave
+        // that kills a motionless player has no opening move at all.
+        if (px < 0) {
+            printf("  FAIL  %s: player does not survive 300 idle ticks\n", level.name);
+            g_failures++;
+            g_checks++;
+            continue;
+        }
+
+        for (unsigned k = 0; k < kCaveCells; k++) seen[k] = false;
+        int head = 0, tail = 0;
+        seen[py * kCaveWidth + px] = true;
+        queue[tail++] = py * kCaveWidth + px;
+        while (head < tail) {
+            const int cell = queue[head++];
+            const int cx = cell % kCaveWidth, cy = cell / kCaveWidth;
+            for (int d = 0; d < 4; d++) {
+                const int nx = cx + dx[d], ny = cy + dy[d];
+                if (nx < 0 || ny < 0 || nx >= (int)kCaveWidth || ny >= (int)kCaveHeight) continue;
+                const int ncell = ny * kCaveWidth + nx;
+                if (seen[ncell]) continue;
+                const uint8_t e = cave.at(nx, ny);
+                if (e == El::Wall || e == El::Steel || e == El::MagicWall) continue;
+                seen[ncell] = true;
+                queue[tail++] = ncell;
+            }
+        }
+
+        int diamonds = 0, butterflies = 0;
+        for (unsigned y = 0; y < kCaveHeight; y++) {
+            for (unsigned x = 0; x < kCaveWidth; x++) {
+                if (!seen[y * kCaveWidth + x]) continue;
+                const uint8_t e = cave.at(x, y);
+                if (e == El::Diamond || e == El::DiamondFalling) diamonds++;
+                if (e >= El::ButterflyBase && e <= El::ButterflyScanned + 3) butterflies++;
+            }
+        }
+        const int supply = diamonds + butterflies * 6;
+        if (supply < level.spec.diamondsNeeded) {
+            printf("  FAIL  %s: only %d reachable after settling (%d diamonds, %d butterflies), "
+                   "needs %u\n",
+                   level.name, supply, diamonds, butterflies, level.spec.diamondsNeeded);
+            g_failures++;
+        }
+        g_checks++;
+    }
+}
+
 // Can the game actually be FINISHED? Everything else in this file tests a rule
 // in isolation. This is the only test that asks the question the whole project
 // rests on, and until it existed the honest answer was that nobody knew.
@@ -795,6 +877,7 @@ int main(int argc, char** argv) {
     testRoundTripCanFail();
     testLevelsAreWellFormed();
     testExitsAreReachable();
+    testSupplyIsReachable();
     testCavesAreCompletable();
     testGeneratorIsDeterministic();
 
