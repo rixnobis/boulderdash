@@ -4,6 +4,7 @@ TYPE = ps-exe
 SRCS = \
 main.cpp \
 tiles.cpp \
+cave.cpp \
 
 CXXFLAGS = -std=c++20
 

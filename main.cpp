@@ -45,6 +45,7 @@ SOFTWARE.
 
 #include "common/syscalls/syscalls.h"
 
+#include "cave.hh"
 #include "tiles.hh"
 
 using namespace bd;
@@ -66,37 +67,35 @@ constexpr int kRows = 15;
 
 constexpr psyqo::Color kBackground = {{.r = 0, .g = 0, .b = 0}};
 
-// A scrap of cave, so the tiles get judged next to the tiles they will actually
-// sit next to. A tilesheet laid out in a neat row looks fine and tells you
-// nothing about whether a boulder reads against dirt.
-const char* const kScene[kRows] = {
-    "SSSSSSSSSSSSSSSSSSSS",
-    "SdddddbddddDdddddddS",
-    "SddPdddddddWWWWdddbS",
-    "SddddddbdddWdddddddS",
-    "SWWWWdddddddDddddddS",
-    "SddddddbddddddbddddS",
-    "SddDdddddddWWWdddddS",
-    "SddddddddddddddddddS",
-    "SddbddddDddddddbdddS",
-    "SdddWWWWWddddddddddS",
-    "SddddddddddDdddddddS",
-    "SdbddddddddddddddbdS",
-    "SdddddddWWWWdddddddS",
-    "SddddDddddddddddddoS",
-    "SSSSSSSSSSSSSSSSSSSS",
-};
+// The viewport. The cave is 40x22 and the screen holds 20x15 tiles, so it
+// scrolls, clamped at the edges.
+constexpr int kViewCols = kCols;
+constexpr int kViewRows = kRows;
 
-TileId tileFor(char c) {
-    switch (c) {
-        case 'S': return TileId::Steel;
-        case 'W': return TileId::Wall;
-        case 'd': return TileId::Dirt;
-        case 'b': return TileId::Boulder;
-        case 'D': return TileId::Diamond;
-        case 'P': return TileId::Player;
-        default: return TileId::Space;
+TileId tileFor(uint8_t element) {
+    switch (element) {
+        case El::Dirt: return TileId::Dirt;
+        case El::Wall: return TileId::Wall;
+        case El::MagicWall: return TileId::Wall;
+        case El::Steel: return TileId::Steel;
+        case El::OutboxHidden: return TileId::Steel;
+        case El::OutboxOpen: return TileId::Diamond;
+        case El::Boulder:
+        case El::BoulderScanned:
+        case El::BoulderFalling:
+        case El::BoulderFallingScanned: return TileId::Boulder;
+        case El::Diamond:
+        case El::DiamondScanned:
+        case El::DiamondFalling:
+        case El::DiamondFallingScanned: return TileId::Diamond;
+        case El::Player:
+        case El::PlayerScanned: return TileId::Player;
+        default: break;
     }
+    if (element >= El::FireflyBase && element <= El::FireflyScanned + 3) return TileId::Boulder;
+    if (element >= El::ButterflyBase && element <= El::ButterflyScanned + 3) return TileId::Diamond;
+    if (element >= El::ExplodeToSpace && element <= El::ExplodeToDiamond + 4) return TileId::Boulder;
+    return TileId::Space;
 }
 
 class Viewer final : public psyqo::Application {
@@ -123,6 +122,12 @@ class SheetScene final : public psyqo::Scene {
     psyqo::Fragments::FixedFragmentWithPrologue<psyqo::Prim::TPage, psyqo::Prim::Sprite16x16, kCols>
         m_rows[2][kRows];
     psyqo::Fragments::SimpleFragment<psyqo::Prim::FastFill> m_clear[2];
+
+    Cave m_cave;
+    unsigned m_tickDivider = 0;
+    int m_camX = 0;
+    int m_camY = 0;
+    void buildRows(unsigned buffer);
 };
 
 Viewer g_viewer;
@@ -167,48 +172,107 @@ void Viewer::createScene() {
 void SheetScene::start(StartReason reason) {
     if (reason != StartReason::Create) return;
 
+    CaveSpec spec;
+    spec.randomSeed = 0x2A;
+    spec.fillObject[0] = El::Boulder;
+    spec.fillProbability[0] = 0x28;
+    spec.fillObject[1] = El::Diamond;
+    spec.fillProbability[1] = 0x10;
+    spec.diamondsNeeded = 12;
+    m_cave.generate(spec, nullptr);
+    m_cave.set(2, 2, El::Player);
+    m_cave.set(20, 12, El::ButterflyBase);
+    m_cave.set(30, 6, El::FireflyBase + 3);
+    m_cave.set(37, 20, El::OutboxHidden);
+
     psyqo::PrimPieces::TPageAttr attr;
     attr.setPageX(kSheetPageX)
         .setPageY(kSheetPageY)
         .set(psyqo::Prim::TPageAttr::Tex4Bits)
         .setDithering(false)
         .disableDisplayArea();
-
     for (unsigned buffer = 0; buffer < 2; buffer++) {
         for (int row = 0; row < kRows; row++) {
             auto& frag = m_rows[buffer][row];
             frag.prologue.attr = attr;
-            unsigned n = 0;
+            frag.count = kCols;
             for (int col = 0; col < kCols; col++) {
-                const TileId id = tileFor(kScene[row][col]);
-                auto& sprite = frag.primitives[n++];
-                // Full-brightness neutral: 0x80 per channel is 1.0 in the GPU's
-                // texture blend, so the palette comes through unmodulated.
+                auto& sprite = frag.primitives[col];
                 sprite.setColor({{.r = 128, .g = 128, .b = 128}});
                 sprite.setOpaque();
                 sprite.position = {{.x = static_cast<int16_t>(col * 16),
                                     .y = static_cast<int16_t>(row * 16)}};
-                sprite.texInfo.u = static_cast<uint8_t>(static_cast<unsigned>(id) * kTileSize);
                 sprite.texInfo.v = 0;
                 sprite.texInfo.clut =
                     psyqo::PrimPieces::ClutIndex(psyqo::Vertex{{.x = kClutVramX, .y = kClutVramY}});
             }
-            frag.count = n;
+        }
+    }
+}
+
+void SheetScene::buildRows(unsigned buffer) {
+    for (int row = 0; row < kViewRows; row++) {
+        auto& frag = m_rows[buffer][row];
+        for (int col = 0; col < kViewCols; col++) {
+            const int cx = m_camX + col;
+            const int cy = m_camY + row;
+            const TileId id =
+                (cx >= 0 && cy >= 0 && cx < (int)kCaveWidth && cy < (int)kCaveHeight)
+                    ? tileFor(m_cave.at(cx, cy))
+                    : TileId::Space;
+            frag.primitives[col].texInfo.u =
+                static_cast<uint8_t>(static_cast<unsigned>(id) * kTileSize);
         }
     }
 }
 
 void SheetScene::frame() {
-    static unsigned s_frames = 0;
-    if (s_frames++ == 30) ramsyscall_printf("frame 30 reached\n");
+    // The cave runs slower than the display. Boulder Dash is a turn-based game
+    // wearing an action game's clothes, and a scan per vblank is far too fast
+    // to read.
+    if (++m_tickDivider >= 8) {
+        m_tickDivider = 0;
+        Input in;
+        const auto pad = psyqo::SimplePad::Pad1;
+        auto& padState = g_viewer.m_pad;
+        if (padState.isButtonPressed(pad, psyqo::SimplePad::Button::Left)) in.dx = -1;
+        else if (padState.isButtonPressed(pad, psyqo::SimplePad::Button::Right)) in.dx = 1;
+        else if (padState.isButtonPressed(pad, psyqo::SimplePad::Button::Up)) in.dy = -1;
+        else if (padState.isButtonPressed(pad, psyqo::SimplePad::Button::Down)) in.dy = 1;
+        in.grab = padState.isButtonPressed(pad, psyqo::SimplePad::Button::Cross);
+        m_cave.tick(in);
+
+        // Follow the player, clamped. Searching the grid for him each tick is
+        // wasteful and completely invisible at this scale.
+        for (unsigned y = 0; y < kCaveHeight; y++) {
+            for (unsigned x = 0; x < kCaveWidth; x++) {
+                const uint8_t e = m_cave.at(x, y);
+                if (e != El::Player && e != El::PlayerScanned) continue;
+                m_camX = (int)x - kViewCols / 2;
+                m_camY = (int)y - kViewRows / 2;
+            }
+        }
+        if (m_camX < 0) m_camX = 0;
+        if (m_camY < 0) m_camY = 0;
+        if (m_camX > (int)kCaveWidth - kViewCols) m_camX = (int)kCaveWidth - kViewCols;
+        if (m_camY > (int)kCaveHeight - kViewRows) m_camY = (int)kCaveHeight - kViewRows;
+    }
+
     const unsigned parity = gpu().getParity();
+    buildRows(parity);
+
     auto& clear = m_clear[parity];
     gpu().getNextClear(clear.primitive, kBackground);
     gpu().chain(clear);
     for (int row = 0; row < kRows; row++) gpu().chain(m_rows[parity][row]);
 
-    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 228}},
-                                psyqo::Color{{.r = 200, .g = 200, .b = 210}}, "TILES R0");
+    const char* state = m_cave.status() == Status::Dead      ? "DEAD"
+                        : m_cave.status() == Status::Escaped ? "OUT"
+                                                             : "";
+    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 226}},
+                                psyqo::Color{{.r = 220, .g = 220, .b = 230}},
+                                "DIAMONDS %u  TICK %u  %s", m_cave.diamonds(), m_cave.ticks(),
+                                state);
 }
 
 }  // namespace
