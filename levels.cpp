@@ -147,15 +147,38 @@ const uint8_t kCave8[] = {
     BD_PLOT(El::FireflyBase + 3, 6, 5),
     BD_PLOT(El::FireflyBase + 1, 11, 8),
     BD_PLOT(El::FireflyBase + 0, 8, 6),
-    BD_FILLED(El::Steel, 20, 6, 16, 3, El::Space),
-    // A way in to the butterflies. They ARE the quota here, and the first
-    // version had them sealed behind steel - the cave was unwinnable and the
-    // exit-reachability gate could not see it, because the EXIT was fine.
-    BD_PLOT(El::Space, 20, 7),
-    BD_LINE(El::Boulder, 21, 5, 14, LineDir::Right),
-    BD_PLOT(El::ButterflyBase + 1, 23, 7),
-    BD_PLOT(El::ButterflyBase + 3, 28, 7),
-    BD_PLOT(El::ButterflyBase + 1, 33, 7),
+    // The chamber has to be TALL enough to hold both the butterflies and the
+    // rocks that kill them, with diggable material between. The first version
+    // was three rows - one interior row - with the boulders sitting on the
+    // steel ROOF, so nothing could ever fall on the butterflies and the cave's
+    // entire quota was uncollectable. It passed every gate, because the gate
+    // credited a reachable butterfly with six diamonds without ever asking
+    // whether anything could reach it from above.
+    //
+    // Interior is dirt, not space, so the boulders rest until the player digs
+    // the support out. That IS the cave: choosing which rock to drop and from
+    // where, with a firefly nest next door that pays nothing and kills you.
+    // Layered on purpose, and the layering is the puzzle. Boulders on row 5,
+    // their DIRT support on row 6, open air on row 7, butterflies on row 8.
+    // The player digs the support from the side, steps away, and the rock
+    // drops two rows onto the butterfly.
+    //
+    // The gap on row 7 is load-bearing in the literal sense. Fill it with dirt
+    // and the only way to drop the rock is to clear that row too - which puts
+    // the player orthogonally adjacent to a butterfly, and adjacency is death.
+    // The cave would then be crushable, pass every gate, and still kill anyone
+    // who tried to win it.
+    BD_FILLED(El::Steel, 20, 4, 16, 6, El::Space),
+    BD_LINE(El::Boulder, 22, 5, 12, LineDir::Right),
+    BD_LINE(El::Dirt, 21, 6, 14, LineDir::Right),
+    // The door, and the APPROACH to it. Piercing the steel is not enough: the
+    // fill dropped a boulder square in front of the opening, and a boulder is
+    // only passable if the cell beyond it is empty, so the door was shut from
+    // the outside by one rock the player could not move.
+    BD_LINE(El::Dirt, 17, 6, 4, LineDir::Right),
+    BD_PLOT(El::ButterflyBase + 1, 23, 8),
+    BD_PLOT(El::ButterflyBase + 3, 28, 8),
+    BD_PLOT(El::ButterflyBase + 1, 33, 8),
     BD_PLOT(El::OutboxHidden, 37, 20),
     BD_END,
 };
@@ -298,7 +321,11 @@ const Level kLevels[] = {
      {.randomSeed = 0xB3,
       .fillObject = {El::Boulder, El::Dirt, El::Dirt, El::Dirt},
       .fillProbability = {0x1C, 0, 0, 0},
-      .diamondsNeeded = 15,
+      // Twelve, not fifteen. The conservative count is six diamonds per
+      // butterfly and only two of the three are reliably reachable after the
+      // cave settles, so a quota of fifteen demanded the third and the gate was
+      // right to refuse it.
+      .diamondsNeeded = 12,
       .magicWallMillingTime = 0,
       .timeLimit = 260,
       .amoebaSlowGrowthTime = 0},

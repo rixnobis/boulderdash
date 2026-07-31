@@ -607,6 +607,19 @@ void testLevelsAreWellFormed() {
 // pushed horizontally, and only into an empty cell. Both gates below used to
 // treat every boulder as passable and that generosity is exactly what let a
 // player ringed by rock read as "can reach everything".
+// Walk UP a cell's column: the first thing that is not space or dirt decides
+// whether anything can ever land here. A boulder or diamond can be made to
+// fall; steel, brick or a magic wall means it never will.
+bool canBeCrushed(const Cave& cave, int x, int y) {
+    for (int cy = y - 1; cy >= 0; cy--) {
+        const uint8_t e = cave.at(x, cy);
+        if (e == El::Space || e == El::Dirt) continue;
+        return e == El::Boulder || e == El::BoulderScanned || e == El::BoulderFalling ||
+               e == El::Diamond || e == El::DiamondScanned || e == El::DiamondFalling;
+    }
+    return false;
+}
+
 bool canEnter(const Cave& cave, int fromX, int fromY, int dx, int dy) {
     const int x = fromX + dx, y = fromY + dy;
     if (x <= 0 || y <= 0 || x >= (int)kCaveWidth - 1 || y >= (int)kCaveHeight - 1) return false;
@@ -748,7 +761,17 @@ void testSupplyIsReachable() {
                 if (!seen[y * kCaveWidth + x]) continue;
                 const uint8_t e = cave.at(x, y);
                 if (e == El::Diamond || e == El::DiamondFalling) diamonds++;
-                if (e >= El::ButterflyBase && e <= El::ButterflyScanned + 3) butterflies++;
+                // A butterfly is only worth diamonds if something can be made to
+                // FALL on it. Crediting every reachable butterfly with six was
+                // an assumption I never checked, and it was false for a whole
+                // cave: NEST's three butterflies were its entire quota and all
+                // three sat under a steel roof. Nothing could ever crush them,
+                // so the cave was unwinnable while passing every gate - and I
+                // had already reported it as an agent limitation rather than a
+                // bug, on exactly the same unchecked assumption.
+                if (e >= El::ButterflyBase && e <= El::ButterflyScanned + 3) {
+                    if (canBeCrushed(cave, x, y)) butterflies++;
+                }
             }
         }
         const int supply = diamonds + butterflies * 6;

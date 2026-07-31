@@ -142,6 +142,34 @@ int firstStepToward(const Cave& cave, int px, int py, Want want) {
     return -1;
 }
 
+// The one goal that is not "walk to a thing that already exists". A butterfly
+// pays nine diamonds when something falls on it, so if the loose diamonds do
+// not cover the quota, the move is to find a rock sitting over a butterfly and
+// dig its support out.
+//
+// The target is the cell DIRECTLY BELOW that rock, not the butterfly and not
+// the cell above it. Standing under a resting boulder is safe - impact is only
+// ever tested against a FALLING object - and the boulder stays put while the
+// player occupies the cell. It falls the moment the planner re-plans and steps
+// away, which needs no special handling because re-planning every tick is what
+// this agent already does.
+bool crushTarget(const Cave& cave, int bx, int by, int& tx, int& ty) {
+    for (int cy = by - 1; cy >= 0; cy--) {
+        const uint8_t e = cave.at(bx, cy);
+        if (e == El::Space || e == El::Dirt) continue;
+        if (e != El::Boulder && e != El::BoulderScanned) return false;
+        // The support is whatever sits immediately under the rock. If it is
+        // already gone the rock is on its way and there is nothing to do.
+        if (cy + 1 >= (int)kCaveHeight) return false;
+        const uint8_t support = cave.at(bx, cy + 1);
+        if (support != El::Dirt) return false;
+        tx = bx;
+        ty = cy + 1;
+        return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 PlayResult playCave(const Level& level, TapeStep* tape, unsigned tapeCapacity, unsigned maxTicks) {
@@ -180,6 +208,29 @@ PlayResult playCave(const Level& level, TapeStep* tape, unsigned tapeCapacity, u
                 const uint8_t e = cave.at(x, y);
                 return e == El::Diamond || e == El::DiamondScanned;
             });
+            if (step < 0) {
+                // No loose diamond in reach. Go and make some: collect every
+                // support cell under a rock that stands over a butterfly, and
+                // let the breadth-first search pick whichever is nearest.
+                static bool wanted[kCaveCells];
+                for (unsigned k = 0; k < kCaveCells; k++) wanted[k] = false;
+                bool any = false;
+                for (unsigned y = 0; y < kCaveHeight; y++) {
+                    for (unsigned x = 0; x < kCaveWidth; x++) {
+                        const uint8_t e = cave.at(x, y);
+                        if (e < El::ButterflyBase || e > El::ButterflyScanned + 3) continue;
+                        int tx = 0, ty = 0;
+                        if (!crushTarget(cave, x, y, tx, ty)) continue;
+                        wanted[ty * kCaveWidth + tx] = true;
+                        any = true;
+                    }
+                }
+                if (any) {
+                    step = firstStepToward(cave, px, py, [&](int x, int y) {
+                        return wanted[y * kCaveWidth + x];
+                    });
+                }
+            }
         }
 
         Input in;
