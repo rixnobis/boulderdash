@@ -1,0 +1,8 @@
+*.o
+*.dep
+*.elf
+*.map
+*.ps-exe
+*.bin
+*.cue
+*.zip
