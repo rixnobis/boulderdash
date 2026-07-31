@@ -58,6 +58,12 @@ enum class TileId : uint8_t {
     Boulder,
     Diamond,
     Player,
+    Firefly,
+    Butterfly,
+    Amoeba,
+    Explosion,
+    Exit,
+    MagicWall,
     Count,
 };
 

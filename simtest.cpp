@@ -269,6 +269,124 @@ void testPushEventuallySucceeds() {
     check(moved, "a horizontal push succeeds within twenty attempts");
 }
 
+int countElement(const Cave& cave, uint8_t want) {
+    int n = 0;
+    for (unsigned y = 0; y < kCaveHeight; y++) {
+        for (unsigned x = 0; x < kCaveWidth; x++) {
+            if (cave.at(x, y) == want) n++;
+        }
+    }
+    return n;
+}
+
+void testAmoebaGrows() {
+    Cave cave;
+    blank(cave);
+    for (unsigned y = 5; y < 15; y++) {
+        for (unsigned x = 5; x < 15; x++) cave.set(x, y, El::Dirt);
+    }
+    cave.set(10, 10, El::Amoeba);
+    check(countElement(cave, El::Amoeba) == 1, "one cell to start");
+    for (int i = 0; i < 40; i++) cave.tick({});
+    check(countElement(cave, El::Amoeba) > 1, "the amoeba grows into space and dirt");
+}
+
+void testTrappedAmoebaBecomesDiamonds() {
+    Cave cave;
+    blank(cave);
+    // Sealed in on all four sides. Nothing else in the cave, so the colony's
+    // whole state is this one cell.
+    cave.set(10, 10, El::Amoeba);
+    cave.set(9, 10, El::Wall);
+    cave.set(11, 10, El::Wall);
+    cave.set(10, 9, El::Wall);
+    cave.set(10, 11, El::Wall);
+    check(cave.at(10, 10) == El::Amoeba, "it starts as amoeba");
+    for (int i = 0; i < 4; i++) cave.tick({});
+    check(cave.at(10, 10) == El::Diamond, "a trapped amoeba suffocates into diamonds");
+
+    // The negative control, which is the half that matters: an amoeba with one
+    // way out must NOT convert. Without this, a bug that converts every amoeba
+    // unconditionally passes the test above perfectly.
+    Cave open;
+    blank(open);
+    open.set(10, 10, El::Amoeba);
+    open.set(9, 10, El::Wall);
+    open.set(11, 10, El::Wall);
+    open.set(10, 9, El::Wall);
+    for (int i = 0; i < 4; i++) open.tick({});
+    check(countElement(open, El::Amoeba) >= 1, "an amoeba with an exit does not convert");
+    check(countElement(open, El::Diamond) == 0, "and leaves no diamonds behind");
+}
+
+void testOvergrownAmoebaBecomesBoulders() {
+    Cave cave;
+    blank(cave);
+    cave.set(20, 10, El::Amoeba);
+    // 38x20 of open space, so it has room to pass two hundred cells.
+    int ticks = 0;
+    while (ticks < 4000 && countElement(cave, El::Boulder) == 0) {
+        cave.tick({});
+        ticks++;
+    }
+    check(countElement(cave, El::Boulder) > 100,
+          "an amoeba past two hundred cells turns to boulders");
+    check(countElement(cave, El::Amoeba) == 0, "and none of it is left as amoeba");
+}
+
+void testMagicWallTransmutes() {
+    Cave cave;
+    blank(cave);
+    CaveSpec spec;
+    spec.magicWallMillingTime = 200;
+    cave.generate(spec, nullptr);
+    for (unsigned y = 1; y < kCaveHeight - 1; y++) {
+        for (unsigned x = 1; x < kCaveWidth - 1; x++) cave.set(x, y, El::Space);
+    }
+    cave.set(10, 10, El::MagicWall);
+    cave.set(10, 5, El::Boulder);
+    check(cave.magicWallState() == 0, "the wall starts dormant");
+    for (int i = 0; i < 6; i++) cave.tick({});
+    check(cave.magicWallState() == 1, "a falling boulder activates it");
+    check(countElement(cave, El::Boulder) == 0, "the boulder is gone");
+    // It emerges two cells below already falling, so by now it has dropped
+    // further - what matters is that a DIAMOND exists where a boulder went in.
+    check(countElement(cave, El::Diamond) + countElement(cave, El::DiamondFalling) == 1,
+          "and a diamond came out the other side");
+    check(cave.at(10, 10) == El::MagicWall, "the wall itself is still there");
+}
+
+void testRestingBoulderDoesNotActivateMagicWall() {
+    // The negative control for the case above. A boulder placed directly on the
+    // wall is never in the falling state, so nothing should happen at all - and
+    // "nothing happened" is only meaningful next to a test where something did.
+    Cave cave;
+    blank(cave);
+    cave.set(10, 10, El::MagicWall);
+    cave.set(10, 9, El::Boulder);
+    for (int i = 0; i < 10; i++) cave.tick({});
+    check(cave.magicWallState() == 0, "a resting boulder leaves the wall dormant");
+    check(countElement(cave, El::Boulder) == 1, "and the boulder is still a boulder");
+}
+
+void testExpiredMagicWallEatsEverything() {
+    Cave cave;
+    blank(cave);
+    CaveSpec spec;
+    spec.magicWallMillingTime = 1;  // expires almost immediately
+    cave.generate(spec, nullptr);
+    for (unsigned y = 1; y < kCaveHeight - 1; y++) {
+        for (unsigned x = 1; x < kCaveWidth - 1; x++) cave.set(x, y, El::Space);
+    }
+    cave.set(10, 10, El::MagicWall);
+    cave.set(10, 5, El::Boulder);
+    for (int i = 0; i < 6; i++) cave.tick({});
+    cave.set(10, 5, El::Boulder);  // a second one, after expiry
+    for (int i = 0; i < 8; i++) cave.tick({});
+    check(cave.magicWallState() == 2, "the wall has expired");
+    check(countElement(cave, El::Boulder) == 0, "and swallowed the second boulder whole");
+}
+
 void testGeneratorIsDeterministic() {
     CaveSpec spec;
     spec.randomSeed = 0x1E;
@@ -368,6 +486,12 @@ int main(int argc, char** argv) {
     testExitOpensOnQuota();
     testHorizontalPushOnly();
     testPushEventuallySucceeds();
+    testAmoebaGrows();
+    testTrappedAmoebaBecomesDiamonds();
+    testOvergrownAmoebaBecomesBoulders();
+    testMagicWallTransmutes();
+    testRestingBoulderDoesNotActivateMagicWall();
+    testExpiredMagicWallEatsEverything();
     testGeneratorIsDeterministic();
 
     printf("%d checks, %d failures\n", g_checks, g_failures);

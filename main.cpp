@@ -72,14 +72,18 @@ constexpr psyqo::Color kBackground = {{.r = 0, .g = 0, .b = 0}};
 constexpr int kViewCols = kCols;
 constexpr int kViewRows = kRows;
 
-TileId tileFor(uint8_t element) {
+TileId tileFor(uint8_t element, uint8_t magicWallState) {
     switch (element) {
         case El::Dirt: return TileId::Dirt;
         case El::Wall: return TileId::Wall;
-        case El::MagicWall: return TileId::Wall;
+        case El::MagicWall: return magicWallState == 1 ? TileId::MagicWall : TileId::Wall;
         case El::Steel: return TileId::Steel;
+        // The hidden outbox is indistinguishable from steel on purpose. That is
+        // the whole point of it being hidden.
         case El::OutboxHidden: return TileId::Steel;
-        case El::OutboxOpen: return TileId::Diamond;
+        case El::OutboxOpen: return TileId::Exit;
+        case El::Amoeba:
+        case El::AmoebaScanned: return TileId::Amoeba;
         case El::Boulder:
         case El::BoulderScanned:
         case El::BoulderFalling:
@@ -92,9 +96,9 @@ TileId tileFor(uint8_t element) {
         case El::PlayerScanned: return TileId::Player;
         default: break;
     }
-    if (element >= El::FireflyBase && element <= El::FireflyScanned + 3) return TileId::Boulder;
-    if (element >= El::ButterflyBase && element <= El::ButterflyScanned + 3) return TileId::Diamond;
-    if (element >= El::ExplodeToSpace && element <= El::ExplodeToDiamond + 4) return TileId::Boulder;
+    if (element >= El::FireflyBase && element <= El::FireflyScanned + 3) return TileId::Firefly;
+    if (element >= El::ButterflyBase && element <= El::ButterflyScanned + 3) return TileId::Butterfly;
+    if (element >= El::ExplodeToSpace && element <= El::ExplodeToDiamond + 4) return TileId::Explosion;
     return TileId::Space;
 }
 
@@ -179,11 +183,46 @@ void SheetScene::start(StartReason reason) {
     spec.fillObject[1] = El::Diamond;
     spec.fillProbability[1] = 0x10;
     spec.diamondsNeeded = 12;
+    spec.amoebaSlowGrowthTime = 250;
+    spec.magicWallMillingTime = 120;
     m_cave.generate(spec, nullptr);
     m_cave.set(2, 2, El::Player);
     m_cave.set(20, 12, El::ButterflyBase);
     m_cave.set(30, 6, El::FireflyBase + 3);
     m_cave.set(37, 20, El::OutboxHidden);
+
+    // The amoeba gets a walled pocket and a long slow-growth time. Left loose
+    // in an open cave it passed two hundred cells inside ninety ticks and
+    // converted the entire west half to boulders - which is the rule working
+    // exactly as documented, and a useless thing to look at.
+    for (unsigned x = 5; x <= 11; x++) {
+        m_cave.set(x, 8, El::Wall);
+        m_cave.set(x, 13, El::Wall);
+    }
+    for (unsigned y = 8; y <= 13; y++) {
+        m_cave.set(5, y, El::Wall);
+        m_cave.set(11, y, El::Wall);
+    }
+    for (unsigned y = 9; y <= 12; y++) {
+        for (unsigned x = 6; x <= 10; x++) m_cave.set(x, y, El::Space);
+    }
+    m_cave.set(8, 10, El::Amoeba);
+
+    // A magic wall with a shaft above it and a hollow below. Placing a boulder
+    // over the wall without clearing a path does nothing at all: the fill made
+    // every cell dirt or rock, so the boulder rests on dirt and never enters the
+    // falling state, and only a FALLING object activates the wall. Correct, and
+    // completely invisible.
+    for (unsigned x = 14; x <= 18; x++) m_cave.set(x, 8, El::MagicWall);
+    for (unsigned y = 2; y <= 7; y++) m_cave.set(16, y, El::Space);
+    for (unsigned y = 9; y <= 12; y++) {
+        for (unsigned x = 14; x <= 18; x++) m_cave.set(x, y, El::Space);
+    }
+    m_cave.set(16, 2, El::Boulder);
+    m_cave.set(16, 3, El::Boulder);
+    m_cave.set(16, 4, El::Boulder);
+    m_cave.set(3, 8, El::FireflyBase + 3);
+    m_cave.set(13, 3, El::ButterflyBase + 1);
 
     psyqo::PrimPieces::TPageAttr attr;
     attr.setPageX(kSheetPageX)
@@ -218,7 +257,7 @@ void SheetScene::buildRows(unsigned buffer) {
             const int cy = m_camY + row;
             const TileId id =
                 (cx >= 0 && cy >= 0 && cx < (int)kCaveWidth && cy < (int)kCaveHeight)
-                    ? tileFor(m_cave.at(cx, cy))
+                    ? tileFor(m_cave.at(cx, cy), m_cave.magicWallState())
                     : TileId::Space;
             frag.primitives[col].texInfo.u =
                 static_cast<uint8_t>(static_cast<unsigned>(id) * kTileSize);

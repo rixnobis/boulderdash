@@ -110,6 +110,7 @@ struct CaveSpec {
     uint8_t fillObject[4] = {El::Dirt, El::Dirt, El::Dirt, El::Dirt};
     uint8_t fillProbability[4] = {0, 0, 0, 0};
     uint16_t diamondsNeeded = 10;
+    uint16_t magicWallMillingTime = 0;
     uint16_t timeLimit = 150;
     uint8_t amoebaSlowGrowthTime = 0;  // shared with magic wall milling time
 };
@@ -132,6 +133,8 @@ class Cave {
     uint16_t diamonds() const { return m_diamonds; }
     uint32_t ticks() const { return m_ticks; }
     bool exitOpen() const { return m_exitOpen; }
+    uint16_t amoebaCount() const { return m_amoebaCount; }
+    uint8_t magicWallState() const { return m_magicWallState; }
 
     // FNV-1a over the whole grid plus the scalar state. This is what the host
     // and the console compare, so it has to cover everything a divergence could
@@ -148,6 +151,7 @@ class Cave {
     void processBoulderish(unsigned x, unsigned y, bool falling, bool isDiamond);
     void processCreature(unsigned x, unsigned y, bool butterfly);
     void processPlayer(unsigned x, unsigned y, const Input& in);
+    void processAmoeba(unsigned x, unsigned y);
     void explode(unsigned x, unsigned y, bool toDiamonds);
     bool slippery(uint8_t e) const;
     void clearScannedFlags();
@@ -163,6 +167,20 @@ class Cave {
     // the first push and the hash says "grid differs" instead of "RNG differs".
     uint8_t m_rngA = 0;
     uint8_t m_rngB = 0;
+
+    // The amoeba cannot decide its own fate one cell at a time: whether it
+    // turns to diamonds or to boulders is a property of the colony. So the scan
+    // accumulates, and the verdict is applied on the FOLLOWING scan - which is
+    // the only reason a growth rule that looks local is not.
+    uint16_t m_amoebaCount = 0;
+    bool m_amoebaCanGrow = false;
+    uint8_t m_amoebaVerdict = 0;  // 0 none, El::Diamond, or El::Boulder
+
+    // One global timer for every magic wall in the cave, not one per wall.
+    uint8_t m_magicWallState = 0;  // 0 dormant, 1 milling, 2 expired
+    uint16_t m_magicWallTimer = 0;
+    uint16_t m_magicWallMillingTime = 0;
+    uint8_t m_amoebaSlowGrowthTime = 0;
 };
 
 }  // namespace bd

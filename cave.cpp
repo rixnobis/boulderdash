@@ -169,6 +169,13 @@ void Cave::generate(const CaveSpec& spec, const uint8_t* instructions) {
     m_exitOpen = false;
     m_rngA = spec.randomSeed;
     m_rngB = 0x13;
+    m_amoebaCount = 0;
+    m_amoebaCanGrow = false;
+    m_amoebaVerdict = 0;
+    m_amoebaSlowGrowthTime = spec.amoebaSlowGrowthTime;
+    m_magicWallState = 0;
+    m_magicWallTimer = 0;
+    m_magicWallMillingTime = spec.magicWallMillingTime;
 }
 
 // ---------------------------------------------------------------------- rules
@@ -208,6 +215,25 @@ void Cave::processBoulderish(unsigned x, unsigned y, bool falling, bool isDiamon
     if (below == El::Space) {
         set(x, y, El::Space);
         set(x, y + 1, fallingScanned);
+        return;
+    }
+
+    // The magic wall. Only a FALLING object activates it - a boulder that comes
+    // to rest on top of one sits there inert forever - and activation is global:
+    // every magic wall in the cave starts milling at once, off one timer.
+    // The object never occupies the wall cell. One tick it is above, the next it
+    // is two cells below, transmuted and already falling.
+    if (falling && below == El::MagicWall) {
+        if (m_magicWallState == 0) {
+            m_magicWallState = 1;
+            m_magicWallTimer = m_magicWallMillingTime;
+        }
+        set(x, y, El::Space);
+        if (m_magicWallState == 1 && y + 2 < kCaveHeight && at(x, y + 2) == El::Space) {
+            set(x, y + 2, isDiamond ? El::BoulderFallingScanned : El::DiamondFallingScanned);
+        }
+        // Expired, or nowhere to emerge: the object is simply gone. That is the
+        // documented behaviour and not a dropped case.
         return;
     }
 
@@ -392,6 +418,63 @@ void Cave::processPlayer(unsigned x, unsigned y, const Input& in) {
     set(tx, ty, El::PlayerScanned);
 }
 
+void Cave::processAmoeba(unsigned x, unsigned y) {
+    // The verdict from LAST scan lands first. The colony is counted during one
+    // scan and judged at the end of it, so the conversion necessarily happens a
+    // tick later than the condition that caused it - which is not a rounding
+    // error in the design, it is the design.
+    if (m_amoebaVerdict != 0) {
+        set(x, y, m_amoebaVerdict);
+        m_amoebaCount++;
+        return;
+    }
+
+    m_amoebaCount++;
+
+    static const int8_t kDx[4] = {0, -1, 1, 0};  // up, left, right, down
+    static const int8_t kDy[4] = {-1, 0, 0, 1};
+    bool canGrow = false;
+    for (unsigned d = 0; d < 4; d++) {
+        const int cx = static_cast<int>(x) + kDx[d];
+        const int cy = static_cast<int>(y) + kDy[d];
+        if (cx < 0 || cy < 0 || cx >= static_cast<int>(kCaveWidth) ||
+            cy >= static_cast<int>(kCaveHeight)) {
+            continue;
+        }
+        const uint8_t n = at(cx, cy);
+        if (n == El::Space || n == El::Dirt) canGrow = true;
+    }
+    if (canGrow) m_amoebaCanGrow = true;
+
+    // Space and dirt only - it does not eat walls, and it does not eat rock.
+    // Roughly 3% per cell per scan, rising to 25% once the slow-growth time has
+    // run out, implemented as a mask on a random byte the way the original does
+    // it rather than as a percentage, so the distribution is the same shape.
+    if (canGrow) {
+        const uint8_t mask = m_ticks >= m_amoebaSlowGrowthTime ? 0x0F : 0x7F;
+        if ((nextRandom(m_rngA, m_rngB) & mask) < 4) {
+            for (unsigned d = 0; d < 4; d++) {
+                const int cx = static_cast<int>(x) + kDx[d];
+                const int cy = static_cast<int>(y) + kDy[d];
+                if (cx < 0 || cy < 0 || cx >= static_cast<int>(kCaveWidth) ||
+                    cy >= static_cast<int>(kCaveHeight)) {
+                    continue;
+                }
+                const uint8_t n = at(cx, cy);
+                if (n != El::Space && n != El::Dirt) continue;
+                // Written as SCANNED so the new cell cannot itself grow in the
+                // same scan, which would let the colony race across the cave in
+                // one tick in whichever direction the scan happens to run.
+                set(cx, cy, El::AmoebaScanned);
+                m_amoebaCount++;
+                break;
+            }
+        }
+    }
+
+    set(x, y, El::AmoebaScanned);
+}
+
 void Cave::scanCell(unsigned x, unsigned y, const Input& in) {
     const uint8_t e = at(x, y);
 
@@ -410,6 +493,7 @@ void Cave::scanCell(unsigned x, unsigned y, const Input& in) {
         case El::Diamond: processBoulderish(x, y, false, true); return;
         case El::DiamondFalling: processBoulderish(x, y, true, true); return;
         case El::Player: processPlayer(x, y, in); return;
+        case El::Amoeba: processAmoeba(x, y); return;
         case El::OutboxHidden:
             if (m_exitOpen) set(x, y, El::OutboxOpen);
             return;
@@ -470,6 +554,30 @@ void Cave::tick(const Input& in) {
         }
     }
 
+    // The colony's verdict, decided now and applied by the next scan. Two
+    // conditions, and they can hold at once - engines disagree about which wins
+    // and I am taking BD2's answer, overgrown before trapped, because the target
+    // here is the 1984 game and not GDash's reading of it.
+    if (m_amoebaVerdict == 0 && m_amoebaCount > 0) {
+        if (m_amoebaCount >= 200) {
+            m_amoebaVerdict = El::Boulder;
+        } else if (!m_amoebaCanGrow) {
+            m_amoebaVerdict = El::Diamond;
+        }
+    } else if (m_amoebaCount == 0) {
+        m_amoebaVerdict = 0;
+    }
+    m_amoebaCount = 0;
+    m_amoebaCanGrow = false;
+
+    if (m_magicWallState == 1) {
+        if (m_magicWallTimer == 0) {
+            m_magicWallState = 2;
+        } else {
+            m_magicWallTimer--;
+        }
+    }
+
     clearScannedFlags();
     m_ticks++;
 }
@@ -487,6 +595,9 @@ uint32_t Cave::hash() const {
     mix(static_cast<uint8_t>(m_exitOpen ? 1 : 0));
     mix(m_rngA);
     mix(m_rngB);
+    mix(m_amoebaVerdict);
+    mix(m_magicWallState);
+    mix(static_cast<uint8_t>(m_magicWallTimer));
     return h;
 }
 
