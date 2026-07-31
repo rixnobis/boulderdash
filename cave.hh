@@ -126,6 +126,10 @@ struct CaveSpec {
     uint16_t magicWallMillingTime = 0;
     uint16_t timeLimit = 150;
     uint8_t amoebaSlowGrowthTime = 0;  // shared with magic wall milling time
+    // Diamonds are worth more once the quota is met, which is the whole reason
+    // to keep digging after the exit opens rather than running for it.
+    uint16_t initialDiamondValue = 10;
+    uint16_t extraDiamondValue = 25;
 };
 
 class Cave {

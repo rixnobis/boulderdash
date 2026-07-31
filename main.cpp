@@ -39,6 +39,7 @@ SOFTWARE.
 #include "psyqo/gpu.hh"
 #include "psyqo/primitives/common.hh"
 #include "psyqo/primitives/control.hh"
+#include "psyqo/primitives/rectangles.hh"
 #include "psyqo/primitives/sprites.hh"
 #include "psyqo/scene.hh"
 #include "psyqo/simplepad.hh"
@@ -167,6 +168,12 @@ class SheetScene final : public psyqo::Scene {
     psyqo::Fragments::FixedFragmentWithPrologue<psyqo::Prim::TPage, psyqo::Prim::Sprite16x16, kCols>
         m_rows[2][kRows];
     psyqo::Fragments::SimpleFragment<psyqo::Prim::FastFill> m_clear[2];
+    // Backing panel for the title text. The first version relied on cave 1
+    // happening to have a walled chamber in the middle of the screen, which
+    // framed the logo beautifully and by pure accident - the two instruction
+    // lines sat on open dirt and were unreadable. A panel makes the title
+    // independent of whatever the attract cave is doing behind it.
+    psyqo::Fragments::SimpleFragment<psyqo::Prim::Rectangle> m_panel[2];
 
     Cave m_cave;
     unsigned m_tickDivider = 0;
@@ -177,8 +184,15 @@ class SheetScene final : public psyqo::Scene {
     unsigned m_secondsLeft = 0;
     unsigned m_secondTimer = 0;
     unsigned m_holdFrames = 0;
+    // Title runs the attract cave: the simulation is already deterministic and
+    // already runs without input, so the front screen is the real game playing
+    // itself rather than a static picture pretending to be one.
+    enum class Mode { Title, Playing } m_mode = Mode::Title;
+    unsigned m_score = 0;
+    unsigned m_blink = 0;
     void buildRows(unsigned buffer);
     void loadLevel(unsigned index);
+    void startGame();
 };
 
 Viewer g_viewer;
@@ -233,6 +247,14 @@ void SheetScene::loadLevel(unsigned index) {
     m_camY = 0;
 }
 
+void SheetScene::startGame() {
+    m_mode = Mode::Playing;
+    m_level = 0;
+    m_lives = 3;
+    m_score = 0;
+    loadLevel(0);
+}
+
 void SheetScene::start(StartReason reason) {
     if (reason != StartReason::Create) return;
 
@@ -260,7 +282,9 @@ void SheetScene::start(StartReason reason) {
         }
     }
 
+    // The attract cave is just cave 0 left to its own devices.
     loadLevel(0);
+    m_mode = Mode::Title;
 }
 
 void SheetScene::buildRows(unsigned buffer) {
@@ -283,20 +307,40 @@ void SheetScene::frame() {
     // The cave runs slower than the display. Boulder Dash is a turn-based game
     // wearing an action game's clothes, and a scan per vblank is far too fast
     // to read.
+    if (m_mode == Mode::Title) {
+        m_blink++;
+        // The attract cave runs slower than play: nobody is reading it for
+        // information, and a screen churning at play speed behind a title is
+        // noise rather than atmosphere.
+        if (++m_tickDivider >= 14) {
+            m_tickDivider = 0;
+            m_cave.tick({});
+            if (m_cave.status() != Status::Playing || m_cave.ticks() > 400) loadLevel(0);
+        }
+        if (g_viewer.m_pad.isButtonPressed(psyqo::SimplePad::Pad1, psyqo::SimplePad::Button::Start)) {
+            startGame();
+        }
+    } else
+
     // A death or an escape holds the screen for a moment before the next cave.
     // Without it the transition is a single frame and reads as a glitch rather
     // than as an outcome.
     if (m_holdFrames > 0) {
         if (--m_holdFrames == 0) {
             if (m_cave.status() == Status::Escaped) {
+                // Time left is worth points, which is the whole reason to take
+                // a risk rather than clear a cave slowly and safely.
+                m_score += m_secondsLeft;
                 m_level = (m_level + 1) % kLevelCount;
                 loadLevel(m_level);
             } else if (m_lives > 0) {
                 m_lives--;
                 loadLevel(m_level);
             } else {
-                m_lives = 3;
-                m_level = 0;
+                // Out of lives: back to the title, where the attract cave picks
+                // up again. Dropping straight into cave 1 with a fresh three
+                // lives gives a loss no weight at all.
+                m_mode = Mode::Title;
                 loadLevel(0);
             }
         }
@@ -330,6 +374,16 @@ void SheetScene::frame() {
         // else that happened in the same scan, because a blast that also
         // dislodged four rocks should read as one event, not five.
         const uint8_t events = m_cave.events();
+        if (events & Ev::Collected) {
+            const Level& level = kLevels[m_level];
+            // A diamond collected after the quota is met is worth more. The
+            // exit opens on the collect that meets it, so that one still scores
+            // at the initial value, which is the behaviour I want anyway.
+            m_score += m_cave.diamonds() > level.spec.diamondsNeeded
+                           ? level.spec.extraDiamondValue
+                           : level.spec.initialDiamondValue;
+        }
+
         if (events & Ev::Exploded) {
             playSfx(Sfx::Explode, 0x2800);
         } else if (events & Ev::Collected) {
@@ -364,18 +418,48 @@ void SheetScene::frame() {
     gpu().chain(clear);
     for (int row = 0; row < kRows; row++) gpu().chain(m_rows[parity][row]);
 
+    if (m_mode == Mode::Title) {
+        auto& panel = m_panel[parity];
+        panel.primitive.setColor({{.r = 10, .g = 10, .b = 20}});
+        // Opaque, not semi-transparent. Half-blending a dark panel over lit
+        // dirt only halves the texture, and text over halved dirt texture is
+        // still text over dirt texture - it was legible in a still and would
+        // have been a mess with the cave moving under it. The attract cave
+        // still reads: it frames the panel on all four sides.
+        panel.primitive.setOpaque();
+        panel.primitive.position = {{.x = 24, .y = 60}};
+        panel.primitive.size = {{.w = 272, .h = 144}};
+        gpu().chain(panel);
+
+        auto& font = g_viewer.m_font;
+        const psyqo::Color bright = {{.r = 240, .g = 220, .b = 120}};
+        const psyqo::Color dim = {{.r = 190, .g = 190, .b = 200}};
+        font.chainprintf(gpu(), {{.x = 92, .y = 74}}, bright, "B O U L D E R");
+        font.chainprintf(gpu(), {{.x = 108, .y = 92}}, bright, "D A S H");
+        font.chainprintf(gpu(), {{.x = 60, .y = 128}}, dim, "DIG. COLLECT. GET OUT ALIVE.");
+        font.chainprintf(gpu(), {{.x = 44, .y = 152}}, dim, "PAD MOVES   X GRABS WITHOUT MOVING");
+        // Blink, because a static prompt on a screen that is already moving
+        // does not read as the thing you are supposed to press.
+        if ((m_blink / 30) & 1) {
+            font.chainprintf(gpu(), {{.x = 108, .y = 186}}, bright, "PRESS START");
+        }
+        return;
+    }
+
     const char* state = m_cave.status() == Status::Dead      ? " DEAD"
                         : m_cave.status() == Status::Escaped ? " OUT"
                         : m_secondsLeft == 0                 ? " TIME"
                                                              : "";
-    // The quota goes bold once it is met, because "the exit is open now" is the
+    // The quota goes green once it is met, because "the exit is open now" is the
     // single most important thing the HUD ever has to say.
     const psyqo::Color quota = m_cave.exitOpen() ? psyqo::Color{{.r = 90, .g = 240, .b = 130}}
                                                  : psyqo::Color{{.r = 220, .g = 220, .b = 230}};
-    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 226}}, quota,
-                                "%s  %u/%u  %us  x%u%s", kLevels[m_level].name, m_cave.diamonds(),
-                                kLevels[m_level].spec.diamondsNeeded, m_secondsLeft, m_lives,
-                                state);
+    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 212}}, quota, "%s  %u/%u%s",
+                                kLevels[m_level].name, m_cave.diamonds(),
+                                kLevels[m_level].spec.diamondsNeeded, state);
+    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 228}},
+                                psyqo::Color{{.r = 200, .g = 200, .b = 210}},
+                                "SCORE %u   TIME %u   LIVES %u", m_score, m_secondsLeft, m_lives);
 }
 
 }  // namespace
