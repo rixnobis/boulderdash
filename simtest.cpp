@@ -36,6 +36,7 @@ SOFTWARE.
 #include <string.h>
 
 #include "cave.hh"
+#include "levels.hh"
 
 using namespace bd;
 
@@ -413,6 +414,72 @@ void testGeneratorIsDeterministic() {
     (void)s1;
 }
 
+// Cave validity. NECESSARY, not sufficient, and saying so matters: a full
+// solvability proof for Boulder Dash is a search over a state space with a
+// probabilistic push in it, which is not OVERDRAW's tractable n! and I am not
+// going to pretend otherwise. What this CAN rule out is a cave broken on
+// arrival - no way to make quota, a player buried in rock, a missing exit, or a
+// layout that collapses the moment physics starts and takes the diamonds down
+// with it.
+//
+// Diamonds have three sources and the first version of this check knew about
+// one, so it failed two caves that were fine and one that genuinely was not. It
+// now names the source it credited, because "SEALED ROOM passes" and "SEALED
+// ROOM passes because it has an amoeba and an amoeba can suffocate into an
+// unbounded number of diamonds" are very different statements and only the
+// second one is honest about how weak the check is.
+void testLevelsAreWellFormed() {
+    for (unsigned i = 0; i < kLevelCount; i++) {
+        const Level& level = kLevels[i];
+        Cave cave;
+        cave.generate(level.spec, level.instructions);
+        cave.set(level.playerX, level.playerY, El::Player);
+
+        int diamonds = 0, outboxes = 0, butterflies = 0, boulders = 0;
+        bool magicWall = false, amoeba = false;
+        for (unsigned y = 0; y < kCaveHeight; y++) {
+            for (unsigned x = 0; x < kCaveWidth; x++) {
+                const uint8_t e = cave.at(x, y);
+                if (e == El::Diamond) diamonds++;
+                if (e == El::Boulder) boulders++;
+                if (e == El::OutboxHidden || e == El::OutboxOpen) outboxes++;
+                if (e >= El::ButterflyBase && e < El::ButterflyBase + 4) butterflies++;
+                if (e == El::MagicWall) magicWall = true;
+                if (e == El::Amoeba) amoeba = true;
+            }
+        }
+        // A crushed butterfly leaves a 3x3, but the corners overlap whatever is
+        // around it, so six is the conservative figure. A magic wall turns
+        // boulders into diamonds one for one. An amoeba that suffocates becomes
+        // diamonds wholesale, which this cannot bound at all - it is credited as
+        // sufficient and that is the weakest link in the whole test.
+        int supply = diamonds + butterflies * 6;
+        const char* source = "loose diamonds";
+        if (supply < level.spec.diamondsNeeded && magicWall) {
+            supply += boulders;
+            source = "loose diamonds + magic wall milling boulders";
+        }
+        if (supply < level.spec.diamondsNeeded && amoeba) {
+            supply = level.spec.diamondsNeeded;
+            source = "an amoeba that must be made to suffocate (UNBOUNDED, uncheckable)";
+        }
+        if (supply < level.spec.diamondsNeeded) {
+            printf("  FAIL  %s: %d available, needs %u\n", level.name, supply,
+                   level.spec.diamondsNeeded);
+            g_failures++;
+        } else {
+            printf("  %-16s quota %2u from %s\n", level.name, level.spec.diamondsNeeded, source);
+        }
+        g_checks++;
+        check(outboxes == 1, level.name);
+
+        // Settle with no input at all. A layout that buries its own diamonds or
+        // kills a stationary player is broken however good it looks on paper.
+        for (int t = 0; t < 60; t++) cave.tick({});
+        check(cave.status() != Status::Dead, level.name);
+    }
+}
+
 // The tape the console will replay. Deliberately busy: it digs, collects,
 // pushes, and drops a rock on a butterfly, so the hash trace covers the paths
 // that actually differ between two compilers.
@@ -492,6 +559,7 @@ int main(int argc, char** argv) {
     testMagicWallTransmutes();
     testRestingBoulderDoesNotActivateMagicWall();
     testExpiredMagicWallEatsEverything();
+    testLevelsAreWellFormed();
     testGeneratorIsDeterministic();
 
     printf("%d checks, %d failures\n", g_checks, g_failures);

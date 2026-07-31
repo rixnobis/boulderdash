@@ -46,6 +46,7 @@ SOFTWARE.
 #include "common/syscalls/syscalls.h"
 
 #include "cave.hh"
+#include "levels.hh"
 #include "tiles.hh"
 
 using namespace bd;
@@ -131,7 +132,13 @@ class SheetScene final : public psyqo::Scene {
     unsigned m_tickDivider = 0;
     int m_camX = 0;
     int m_camY = 0;
+    unsigned m_level = 0;
+    unsigned m_lives = 3;
+    unsigned m_secondsLeft = 0;
+    unsigned m_secondTimer = 0;
+    unsigned m_holdFrames = 0;
     void buildRows(unsigned buffer);
+    void loadLevel(unsigned index);
 };
 
 Viewer g_viewer;
@@ -173,56 +180,19 @@ void Viewer::createScene() {
     pushScene(&g_sheetScene);
 }
 
+void SheetScene::loadLevel(unsigned index) {
+    const Level& level = kLevels[index];
+    m_cave.generate(level.spec, level.instructions);
+    m_cave.set(level.playerX, level.playerY, El::Player);
+    m_secondsLeft = level.spec.timeLimit;
+    m_secondTimer = 0;
+    m_holdFrames = 0;
+    m_camX = 0;
+    m_camY = 0;
+}
+
 void SheetScene::start(StartReason reason) {
     if (reason != StartReason::Create) return;
-
-    CaveSpec spec;
-    spec.randomSeed = 0x2A;
-    spec.fillObject[0] = El::Boulder;
-    spec.fillProbability[0] = 0x28;
-    spec.fillObject[1] = El::Diamond;
-    spec.fillProbability[1] = 0x10;
-    spec.diamondsNeeded = 12;
-    spec.amoebaSlowGrowthTime = 250;
-    spec.magicWallMillingTime = 120;
-    m_cave.generate(spec, nullptr);
-    m_cave.set(2, 2, El::Player);
-    m_cave.set(20, 12, El::ButterflyBase);
-    m_cave.set(30, 6, El::FireflyBase + 3);
-    m_cave.set(37, 20, El::OutboxHidden);
-
-    // The amoeba gets a walled pocket and a long slow-growth time. Left loose
-    // in an open cave it passed two hundred cells inside ninety ticks and
-    // converted the entire west half to boulders - which is the rule working
-    // exactly as documented, and a useless thing to look at.
-    for (unsigned x = 5; x <= 11; x++) {
-        m_cave.set(x, 8, El::Wall);
-        m_cave.set(x, 13, El::Wall);
-    }
-    for (unsigned y = 8; y <= 13; y++) {
-        m_cave.set(5, y, El::Wall);
-        m_cave.set(11, y, El::Wall);
-    }
-    for (unsigned y = 9; y <= 12; y++) {
-        for (unsigned x = 6; x <= 10; x++) m_cave.set(x, y, El::Space);
-    }
-    m_cave.set(8, 10, El::Amoeba);
-
-    // A magic wall with a shaft above it and a hollow below. Placing a boulder
-    // over the wall without clearing a path does nothing at all: the fill made
-    // every cell dirt or rock, so the boulder rests on dirt and never enters the
-    // falling state, and only a FALLING object activates the wall. Correct, and
-    // completely invisible.
-    for (unsigned x = 14; x <= 18; x++) m_cave.set(x, 8, El::MagicWall);
-    for (unsigned y = 2; y <= 7; y++) m_cave.set(16, y, El::Space);
-    for (unsigned y = 9; y <= 12; y++) {
-        for (unsigned x = 14; x <= 18; x++) m_cave.set(x, y, El::Space);
-    }
-    m_cave.set(16, 2, El::Boulder);
-    m_cave.set(16, 3, El::Boulder);
-    m_cave.set(16, 4, El::Boulder);
-    m_cave.set(3, 8, El::FireflyBase + 3);
-    m_cave.set(13, 3, El::ButterflyBase + 1);
 
     psyqo::PrimPieces::TPageAttr attr;
     attr.setPageX(kSheetPageX)
@@ -247,6 +217,8 @@ void SheetScene::start(StartReason reason) {
             }
         }
     }
+
+    loadLevel(0);
 }
 
 void SheetScene::buildRows(unsigned buffer) {
@@ -269,8 +241,39 @@ void SheetScene::frame() {
     // The cave runs slower than the display. Boulder Dash is a turn-based game
     // wearing an action game's clothes, and a scan per vblank is far too fast
     // to read.
-    if (++m_tickDivider >= 8) {
+    // A death or an escape holds the screen for a moment before the next cave.
+    // Without it the transition is a single frame and reads as a glitch rather
+    // than as an outcome.
+    if (m_holdFrames > 0) {
+        if (--m_holdFrames == 0) {
+            if (m_cave.status() == Status::Escaped) {
+                m_level = (m_level + 1) % kLevelCount;
+                loadLevel(m_level);
+            } else if (m_lives > 0) {
+                m_lives--;
+                loadLevel(m_level);
+            } else {
+                m_lives = 3;
+                m_level = 0;
+                loadLevel(0);
+            }
+        }
+    } else if (m_cave.status() != Status::Playing) {
+        m_holdFrames = 90;
+    } else if (++m_tickDivider >= 8) {
         m_tickDivider = 0;
+
+        // One second per fifty ticks at this divider, near enough. Running out
+        // of time is a death, which is why it goes through the same path.
+        if (++m_secondTimer >= 8) {
+            m_secondTimer = 0;
+            if (m_secondsLeft > 0) {
+                m_secondsLeft--;
+            } else {
+                m_holdFrames = 90;
+            }
+        }
+
         Input in;
         const auto pad = psyqo::SimplePad::Pad1;
         auto& padState = g_viewer.m_pad;
@@ -305,12 +308,17 @@ void SheetScene::frame() {
     gpu().chain(clear);
     for (int row = 0; row < kRows; row++) gpu().chain(m_rows[parity][row]);
 
-    const char* state = m_cave.status() == Status::Dead      ? "DEAD"
-                        : m_cave.status() == Status::Escaped ? "OUT"
+    const char* state = m_cave.status() == Status::Dead      ? " DEAD"
+                        : m_cave.status() == Status::Escaped ? " OUT"
+                        : m_secondsLeft == 0                 ? " TIME"
                                                              : "";
-    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 226}},
-                                psyqo::Color{{.r = 220, .g = 220, .b = 230}},
-                                "DIAMONDS %u  TICK %u  %s", m_cave.diamonds(), m_cave.ticks(),
+    // The quota goes bold once it is met, because "the exit is open now" is the
+    // single most important thing the HUD ever has to say.
+    const psyqo::Color quota = m_cave.exitOpen() ? psyqo::Color{{.r = 90, .g = 240, .b = 130}}
+                                                 : psyqo::Color{{.r = 220, .g = 220, .b = 230}};
+    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 226}}, quota,
+                                "%s  %u/%u  %us  x%u%s", kLevels[m_level].name, m_cave.diamonds(),
+                                kLevels[m_level].spec.diamondsNeeded, m_secondsLeft, m_lives,
                                 state);
 }
 

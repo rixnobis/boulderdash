@@ -5,6 +5,7 @@ SRCS = \
 main.cpp \
 tiles.cpp \
 cave.cpp \
+levels.cpp \
 
 CXXFLAGS = -std=c++20
 
