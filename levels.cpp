@@ -179,15 +179,32 @@ const uint8_t kCave9[] = {
 
 // 10. No dirt at all. Every cell is rock, diamond or air, so nothing can be
 //     tunnelled and the only tool left is which rock you push and when.
+// Rewritten. The first version was three unsupported boulder rows over open
+// space: everything fell on tick one into a single heap at the bottom, burying
+// its own diamonds, and only six of twenty-three were ever reachable again.
+// A cave with no dirt needs STEEL to hold its shape, because dirt was the only
+// other thing doing that job.
+//
+// Shelves alternate their gap so the route down zigzags, and the boulders sit
+// ON the shelves rather than in mid-air - so they stay put until pushed, which
+// is the entire mechanic this cave exists for.
 const uint8_t kCave10[] = {
-    BD_FILLED(El::Steel, 2, 2, 36, 18, El::Space),
-    BD_LINE(El::Boulder, 4, 6, 32, LineDir::Right),
-    BD_LINE(El::Boulder, 4, 11, 32, LineDir::Right),
-    BD_LINE(El::Boulder, 4, 16, 32, LineDir::Right),
-    BD_LINE(El::Diamond, 6, 5, 6, LineDir::Right),
-    BD_LINE(El::Diamond, 24, 10, 8, LineDir::Right),
-    BD_LINE(El::Diamond, 10, 15, 8, LineDir::Right),
-    BD_PLOT(El::OutboxHidden, 36, 18),
+    BD_LINE(El::Steel, 3, 7, 30, LineDir::Right),
+    BD_LINE(El::Steel, 7, 12, 30, LineDir::Right),
+    BD_LINE(El::Steel, 3, 17, 30, LineDir::Right),
+    BD_LINE(El::Boulder, 6, 6, 20, LineDir::Right),
+    BD_LINE(El::Boulder, 10, 11, 20, LineDir::Right),
+    BD_LINE(El::Boulder, 6, 16, 20, LineDir::Right),
+    BD_LINE(El::Diamond, 27, 6, 5, LineDir::Right),
+    BD_LINE(El::Diamond, 8, 11, 2, LineDir::Right),
+    BD_LINE(El::Diamond, 27, 16, 6, LineDir::Right),
+    BD_LINE(El::Diamond, 4, 6, 2, LineDir::Right),
+    BD_LINE(El::Diamond, 31, 11, 5, LineDir::Right),
+    // Placed where the flood fill says the player can actually stand after the
+    // cave settles, rather than where it looked tidy. At (36,18) the planner
+    // collected the whole quota, sixteen of sixteen, and then spent four
+    // thousand ticks unable to reach an exit five cells away.
+    BD_PLOT(El::OutboxHidden, 32, 18),
     BD_END,
 };
 

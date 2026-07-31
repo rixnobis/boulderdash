@@ -603,6 +603,35 @@ void testLevelsAreWellFormed() {
 // It also does something the play agent cannot: it distinguishes "this cave is
 // broken" from "my agent is not clever enough", which is the difference between
 // a bug and a limitation and the thing I most needed to be able to tell apart.
+// Passability is a property of the MOVE, not of the cell: a boulder can be
+// pushed horizontally, and only into an empty cell. Both gates below used to
+// treat every boulder as passable and that generosity is exactly what let a
+// player ringed by rock read as "can reach everything".
+bool canEnter(const Cave& cave, int fromX, int fromY, int dx, int dy) {
+    const int x = fromX + dx, y = fromY + dy;
+    if (x <= 0 || y <= 0 || x >= (int)kCaveWidth - 1 || y >= (int)kCaveHeight - 1) return false;
+    const uint8_t e = cave.at(x, y);
+    if (e == El::Wall || e == El::Steel || e == El::MagicWall) return false;
+    if (e == El::Boulder || e == El::BoulderScanned) {
+        if (dy != 0) return false;
+        const int beyond = x + dx;
+        if (beyond <= 0 || beyond >= (int)kCaveWidth - 1) return false;
+        return cave.at(beyond, y) == El::Space;
+    }
+    return true;
+}
+
+// NOTE the asymmetry with testSupplyIsReachable below, which is deliberate and
+// was arrived at the hard way. This gate runs on the UNSETTLED cave and asks
+// "is the exit walled off by terrain nothing can ever get through" - so it is
+// generous about boulders, because rocks fall away and a cell blocked at tick
+// zero is often open by tick fifty. Making it strict produced two failures on
+// caves the agent was demonstrably WINNING, which is a gate contradicting a
+// measurement and therefore a bug in the gate.
+//
+// The supply gate runs AFTER settling, where the world has stopped moving, so
+// strict push-aware passability is the honest model there. It agrees with the
+// agent, which is the check on the check.
 void testExitsAreReachable() {
     static bool seen[kCaveCells];
     static int queue[kCaveCells];
@@ -707,8 +736,7 @@ void testSupplyIsReachable() {
                 if (nx < 0 || ny < 0 || nx >= (int)kCaveWidth || ny >= (int)kCaveHeight) continue;
                 const int ncell = ny * kCaveWidth + nx;
                 if (seen[ncell]) continue;
-                const uint8_t e = cave.at(nx, ny);
-                if (e == El::Wall || e == El::Steel || e == El::MagicWall) continue;
+                if (!canEnter(cave, cx, cy, dx[d], dy[d])) continue;
                 seen[ncell] = true;
                 queue[tail++] = ncell;
             }
@@ -746,6 +774,21 @@ void testCavesAreCompletable() {
                r.escaped ? "ESCAPED" : "stuck  ", r.ticks, r.diamonds,
                kLevels[i].spec.diamondsNeeded, r.escaped ? "" : " - ", r.escaped ? "" : r.failure);
         if (r.escaped) completed++;
+
+        // The sharpest signal this harness produces, and it is free: if the
+        // planner made the QUOTA and still could not get out, the exit is
+        // unreachable in practice regardless of what the static gate says. That
+        // is never an agent limitation - it walked to every diamond it needed,
+        // so it can walk - it is always a cave bug. It caught UNDERMINE and
+        // WALL FOLLOWERS behind sealed brick, and then NO DIRT after those were
+        // fixed. Noticing it by eye three times is two times too many.
+        if (!r.escaped && r.diamonds >= kLevels[i].spec.diamondsNeeded) {
+            printf("  FAIL  %s: made quota (%u/%u) and never reached the exit - the exit is "
+                   "unreachable in practice\n",
+                   kLevels[i].name, r.diamonds, kLevels[i].spec.diamondsNeeded);
+            g_failures++;
+        }
+        g_checks++;
     }
     // The bar is deliberately low and the reason matters. This planner walks to
     // the nearest loose diamond and then to the exit; it has no concept of

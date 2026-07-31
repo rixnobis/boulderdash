@@ -184,6 +184,14 @@ void Cave::placePlayer(unsigned x, unsigned y) {
     // Dirt overhead, not space: dirt supports whatever is above it, so this
     // stops the column falling rather than merely delaying it by a tick.
     if (y > 0) set(x, y - 1, El::Dirt);
+    // And dirt below, which guarantees a legal opening move. The random fill
+    // can and does bury the start in boulders on every side, and a boulder is
+    // only passable if the cell BEYOND it is empty - so a player ringed by rock
+    // sitting in dirt is trapped completely, with no push available in any
+    // direction. TWIN MILLS was exactly that: the cave was healthy, the mills
+    // ran, nineteen diamonds waited in the basins, and the player could not
+    // take a single step for four thousand ticks.
+    if (y + 1 < kCaveHeight) set(x, y + 1, El::Dirt);
 }
 
 // ---------------------------------------------------------------------- rules
