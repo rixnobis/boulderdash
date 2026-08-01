@@ -67,8 +67,19 @@ const uint8_t kCave3[] = {
     BD_END,
 };
 
-// 4. Butterflies over a rock shelf. Drop a rock on one and it pays out nine
-//    diamonds, which is the only way to make the quota.
+// 4. Butterflies under an unsupported rock shelf, and the introduction to what
+//    a butterfly is worth. The rocks have nothing holding them, so they fall on
+//    tick one and the payout happens whether the player does anything or not.
+//
+//    That is deliberate NOW and was an accident before: the comment used to say
+//    "drop a rock on one, which is the only way to make the quota", describing
+//    a move the player never makes. Kept as-is rather than fixed, because it
+//    earns its place as the gentle version - this cave shows you that a crushed
+//    butterfly becomes diamonds, and NEST later makes you arrange it yourself
+//    with a dirt support to dig and a firefly nest next door. Two caves, one
+//    mechanic, taught then tested.
+//
+//    The comment was the thing that was wrong, not the layout.
 const uint8_t kCave4[] = {
     BD_FILLED(El::Steel, 8, 12, 24, 2, El::Space),
     BD_LINE(El::Boulder, 9, 5, 20, LineDir::Right),

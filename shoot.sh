@@ -21,7 +21,10 @@ PORT=${2:-8171}
 SETTLE=${3:-6}
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-EXE="$HERE/boulderdash.ps-exe"
+# Which binary. `make DEMO=n` produces boulderdash-demo.ps-exe, which boots
+# straight into a cave - the only way to photograph gameplay, since START cannot
+# be pressed in a headless emulator.
+EXE="$HERE/${BD_EXE:-boulderdash.ps-exe}"
 REDUX=${REDUX:-/home/pixel/sources/pcsx-redux-wt/tetris-bg/pcsx-redux}
 
 if [ ! -f "$EXE" ]; then echo "no $EXE - build first"; exit 1; fi
