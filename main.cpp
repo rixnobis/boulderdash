@@ -282,9 +282,21 @@ void SheetScene::start(StartReason reason) {
         }
     }
 
+#ifdef BD_DEMO_LEVEL
+    // Boots straight into a cave, for screenshots and art review. There is no
+    // way to press START in a headless emulator, so without this the only
+    // picture obtainable of this game is its title screen - which is a poor
+    // position to be in when the art is the thing being judged.
+    m_level = BD_DEMO_LEVEL;
+    m_mode = Mode::Playing;
+    m_lives = 3;
+    m_score = 0;
+    loadLevel(m_level);
+#else
     // The attract cave is just cave 0 left to its own devices.
     loadLevel(0);
     m_mode = Mode::Title;
+#endif
 }
 
 void SheetScene::buildRows(unsigned buffer) {
@@ -446,6 +458,17 @@ void SheetScene::frame() {
         return;
     }
 
+    // A bar behind the status lines. They were drawn straight onto cave tiles,
+    // and a boulder passing under the score made it unreadable - which is the
+    // one thing a HUD may never be. Opaque, for the same reason the title panel
+    // is: half-blending over lit dirt still leaves text sitting on texture.
+    auto& hud = m_panel[parity];
+    hud.primitive.setColor({{.r = 12, .g = 12, .b = 20}});
+    hud.primitive.setOpaque();
+    hud.primitive.position = {{.x = 0, .y = 206}};
+    hud.primitive.size = {{.w = 320, .h = 34}};
+    gpu().chain(hud);
+
     const char* state = m_cave.status() == Status::Dead      ? " DEAD"
                         : m_cave.status() == Status::Escaped ? " OUT"
                         : m_secondsLeft == 0                 ? " TIME"
@@ -454,10 +477,13 @@ void SheetScene::frame() {
     // single most important thing the HUD ever has to say.
     const psyqo::Color quota = m_cave.exitOpen() ? psyqo::Color{{.r = 90, .g = 240, .b = 130}}
                                                  : psyqo::Color{{.r = 220, .g = 220, .b = 230}};
-    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 212}}, quota, "%s  %u/%u%s",
+    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 208}}, quota, "%s  %u/%u%s",
                                 kLevels[m_level].name, m_cave.diamonds(),
                                 kLevels[m_level].spec.diamondsNeeded, state);
-    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 228}},
+    // 223, not 228. The frame is 239 lines and the font is sixteen tall, so a
+    // baseline at 228 runs off the bottom of the display and the last line was
+    // being shaved in half.
+    g_viewer.m_font.chainprintf(gpu(), {{.x = 4, .y = 223}},
                                 psyqo::Color{{.r = 200, .g = 200, .b = 210}},
                                 "SCORE %u   TIME %u   LIVES %u", m_score, m_secondsLeft, m_lives);
 }
