@@ -292,6 +292,33 @@ void SheetScene::start(StartReason reason) {
     m_lives = 3;
     m_score = 0;
     loadLevel(m_level);
+#ifdef BD_DEMO_DEATH
+    // Drops a rock on the player's head a few ticks in. The only way to see the
+    // death animation headless: the player never moves without a pad, so
+    // nothing will ever kill him on its own, and an animation nobody has looked
+    // at is an animation nobody has checked.
+    {
+        // Player moved DOWN and the rock dropped from his old row. The first
+        // version computed `playerY - 5` and the players all start on row two -
+        // playerY is unsigned, so that underflowed and wrote a boulder outside
+        // the grid entirely. It corrupted whatever sat past the array and the
+        // only symptom was that nothing died, which is a poor symptom for an
+        // out-of-bounds write to have.
+        const Level& level = kLevels[m_level];
+        const int px = level.playerX;
+        const int top = level.playerY;
+        const int py = top + 6;
+        if (py < static_cast<int>(kCaveHeight) - 1) {
+            m_cave.set(px, top, El::Space);
+            for (int y = top; y < py; y++) m_cave.set(px, y, El::Space);
+            m_cave.placePlayer(px, py);
+            // placePlayer puts dirt overhead, which would stop the rock. This
+            // demo wants it to arrive.
+            m_cave.set(px, py - 1, El::Space);
+            m_cave.set(px, top, El::Boulder);
+        }
+    }
+#endif
 #else
     // The attract cave is just cave 0 left to its own devices.
     loadLevel(0);
@@ -357,7 +384,15 @@ void SheetScene::frame() {
             }
         }
     } else if (m_cave.status() != Status::Playing) {
+#ifdef BD_DEMO_DEATH
+        // Ten seconds, not one and a half. The death resolves in five explosion
+        // stages and the hold is ninety frames, so the whole event was over
+        // before a headless emulator had finished booting - I was photographing
+        // the RELOADED cave and reading it as "the death did not happen".
+        m_holdFrames = 600;
+#else
         m_holdFrames = 90;
+#endif
     } else if (++m_tickDivider >= 8) {
         m_tickDivider = 0;
 

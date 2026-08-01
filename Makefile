@@ -17,6 +17,11 @@ CXXFLAGS = -std=c++20
 ifdef DEMO
 CXXFLAGS += -DBD_DEMO_LEVEL=$(DEMO)
 TARGET = boulderdash-demo
+# make DEMO=n DEATH=1 additionally drops a rock on the player, which is the only
+# way to photograph the death animation without a controller.
+ifdef DEATH
+CXXFLAGS += -DBD_DEMO_DEATH=1
+endif
 endif
 
 PSYQO_ROOT ?= third_party/nugget
