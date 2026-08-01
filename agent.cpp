@@ -81,16 +81,25 @@ bool passable(const Cave& cave, int fromX, int fromY, int dx, int dy) {
 }
 
 bool dangerous(const Cave& cave, int x, int y) {
-    for (int d = 0; d < 4; d++) {
-        const int cx = x + kDx[d], cy = y + kDy[d];
-        if (cx < 0 || cy < 0 || cx >= static_cast<int>(kCaveWidth) ||
-            cy >= static_cast<int>(kCaveHeight)) {
-            continue;
+    // Creatures within TWO cells, not one. A creature moves before it is next
+    // checked for adjacency, so a cell that is safe when the route is planned
+    // is lethal one tick later if something was standing next door to it. This
+    // is a one-tick lookahead in the cheapest possible form - no simulation of
+    // where the creature will actually go, just a refusal to stand anywhere it
+    // could reach.
+    for (int oy = -2; oy <= 2; oy++) {
+        for (int ox = -2; ox <= 2; ox++) {
+            if (ox * ox + oy * oy > 4) continue;
+            const int cx = x + ox, cy = y + oy;
+            if (cx < 0 || cy < 0 || cx >= static_cast<int>(kCaveWidth) ||
+                cy >= static_cast<int>(kCaveHeight)) {
+                continue;
+            }
+            const uint8_t e = cave.at(cx, cy);
+            if (e >= El::FireflyBase && e <= El::FireflyScanned + 3) return true;
+            if (e >= El::ButterflyBase && e <= El::ButterflyScanned + 3) return true;
+            if (e == El::Amoeba || e == El::AmoebaScanned) return true;
         }
-        const uint8_t e = cave.at(cx, cy);
-        if (e >= El::FireflyBase && e <= El::FireflyScanned + 3) return true;
-        if (e >= El::ButterflyBase && e <= El::ButterflyScanned + 3) return true;
-        if (e == El::Amoeba || e == El::AmoebaScanned) return true;
     }
     // A falling object directly overhead lands on this cell next tick.
     if (y > 0) {

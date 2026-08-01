@@ -785,6 +785,52 @@ void testSupplyIsReachable() {
     }
 }
 
+// NEST's central move, measured rather than asserted.
+//
+// The planner cannot finish this cave, and last time I said so I was wrong: I
+// called it an agent gap without checking whether the move was available at
+// all, and it was not - the butterflies were roofed in steel. So this time the
+// claim gets an instrument. Stand next to the support cell, dig it, step back,
+// and see whether a butterfly dies and the player lives.
+//
+// If this passes, the cave is winnable and the planner is the limit. If it
+// fails, the cave is broken and no amount of cleverness would have helped.
+void testNestCrushIsSurvivable() {
+    const Level& level = kLevels[7];
+    Cave cave;
+    cave.generate(level.spec, level.instructions);
+    // Staged beside the support cell under the first rock, which is where a
+    // player who had walked in would be standing.
+    cave.placePlayer(22, 6);
+
+    int before = 0;
+    for (unsigned y = 0; y < kCaveHeight; y++) {
+        for (unsigned x = 0; x < kCaveWidth; x++) {
+            const uint8_t e = cave.at(x, y);
+            if (e >= El::ButterflyBase && e <= El::ButterflyScanned + 3) before++;
+        }
+    }
+    check(before == 3, "NEST starts with three butterflies");
+
+    // Dig the support out, then retreat. The rock rests on the player while he
+    // stands there and falls the moment he leaves, which is the whole move.
+    cave.tick({.dx = 1, .dy = 0, .grab = false});
+    for (int i = 0; i < 3; i++) cave.tick({.dx = -1, .dy = 0, .grab = false});
+    for (int i = 0; i < 20; i++) cave.tick({});
+
+    int after = 0, diamonds = 0;
+    for (unsigned y = 0; y < kCaveHeight; y++) {
+        for (unsigned x = 0; x < kCaveWidth; x++) {
+            const uint8_t e = cave.at(x, y);
+            if (e >= El::ButterflyBase && e <= El::ButterflyScanned + 3) after++;
+            if (e == El::Diamond || e == El::DiamondFalling) diamonds++;
+        }
+    }
+    check(after < before, "digging the support drops the rock and kills a butterfly");
+    check(diamonds >= 6, "which pays out in diamonds");
+    check(cave.status() != Status::Dead, "and the player survives doing it");
+}
+
 // Can the game actually be FINISHED? Everything else in this file tests a rule
 // in isolation. This is the only test that asks the question the whole project
 // rests on, and until it existed the honest answer was that nobody knew.
@@ -944,6 +990,7 @@ int main(int argc, char** argv) {
     testLevelsAreWellFormed();
     testExitsAreReachable();
     testSupplyIsReachable();
+    testNestCrushIsSurvivable();
     testCavesAreCompletable();
     testGeneratorIsDeterministic();
 
