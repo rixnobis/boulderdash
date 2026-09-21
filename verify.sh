@@ -78,9 +78,12 @@ LAUNCH=$!
 # Poll instead of sleeping on a guess. The still endpoint answers 200 with a
 # valid blank PNG well before the game has drawn anything, so the colour count
 # is the readiness test, not the HTTP status.
+CURLRC=none
 for _ in $(seq 1 30); do
     sleep 1
-    curl -s -m 5 "http://localhost:8299/api/v1/screen/still" -o /tmp/bd-verify.png || continue
+    curl -s -m 5 "http://localhost:8299/api/v1/screen/still" -o /tmp/bd-verify.png
+    CURLRC=$?
+    [ "$CURLRC" -eq 0 ] || continue
     [ "$(convert /tmp/bd-verify.png -format %k info:- 2>/dev/null || echo 0)" -ge 6 ] && break
 done
 # Walk the PID tree. A `pkill -f pcsx-redux` would self-match the shell running
@@ -96,8 +99,14 @@ COLORS=$(convert /tmp/bd-verify.png -format %k info:- 2>/dev/null)
 echo "  frame: ${DIMS:-none}, ${COLORS:-0} colors"
 if [ "${DIMS:-}" != "320x239" ] || [ "${COLORS:-0}" -lt 6 ]; then
     echo "  render FAILED (want 320x239 and >= 6 colors)"
-    echo "  --- emulator log ---"
-    tail -20 /tmp/bd-verify.log
+    # Each of these fails differently and all three land on "frame: none":
+    # the emulator never started, it started and drew nothing, or the web
+    # server never accepted a connection.
+    echo "  last curl exit: $CURLRC"
+    echo "  png: $(ls -la /tmp/bd-verify.png 2>&1)"
+    echo "  Xvfb: $(command -v Xvfb || echo 'not installed')"
+    echo "  --- emulator log ($(wc -c < /tmp/bd-verify.log 2>/dev/null || echo 0) bytes) ---"
+    tail -20 /tmp/bd-verify.log 2>&1
     FAIL=1
 fi
 
