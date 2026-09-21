@@ -22,6 +22,15 @@ cd "$(dirname "$0")" || exit 1
 
 REDUX=${REDUX:-/home/pixel/sources/pcsx-redux-wt/tetris-bg/pcsx-redux}
 BIOS=${BIOS:-/home/pixel/sources/pcsx-redux/src/mips/openbios/openbios.bin}
+# pcsx-redux boots its built-in OpenBIOS when no -bios is given, which is what
+# CI uses. A local openbios.bin still wins when there is one, so the gates run
+# against the same kernel a developer is looking at.
+if [ -f "$BIOS" ]; then
+    BIOSARG="-bios $BIOS"
+else
+    BIOSARG=""
+    echo "note: no BIOS at $BIOS, running on the emulator's built-in OpenBIOS"
+fi
 FAIL=0
 step() { echo; echo "=== $* ==="; }
 
@@ -45,7 +54,7 @@ for f in boulderdash.ps-exe boulderdash-selftest.ps-exe; do
 done
 
 step "3/5 host vs R3000 differential"
-timeout 90 "$REDUX" -no-ui -run -stdout -testmode -interpreter -bios "$BIOS" \
+timeout 90 "$REDUX" -no-ui -run -stdout -testmode -interpreter $BIOSARG \
     -loadexe boulderdash-selftest.ps-exe 2>&1 | grep -aE "BOULDERDASH|FAIL|ticks simulated|matches|playback"
 SELFTEST=${PIPESTATUS[0]}
 echo "  exit=$SELFTEST"
@@ -56,7 +65,7 @@ step "4/5 audio"
 # status register would be the right instrument on silicon and is not modelled
 # here - it reads back as whatever was last written, so it reports every sample
 # as never having played. The control inside the test is what catches that.
-timeout 90 "$REDUX" -no-ui -run -stdout -testmode -interpreter -bios "$BIOS" \
+timeout 90 "$REDUX" -no-ui -run -stdout -testmode -interpreter $BIOSARG \
     -loadexe boulderdash-soundtest.ps-exe 2>&1 | grep -aE "BOULDERDASH|sfx |control|FAIL"
 SOUND=${PIPESTATUS[0]}
 echo "  exit=$SOUND"
@@ -64,7 +73,7 @@ echo "  exit=$SOUND"
 
 step "5/5 render"
 xvfb-run -a "$REDUX" -run -stdout -webserver -webserver-port 8299 -interpreter \
-    -bios "$BIOS" -loadexe "$PWD/boulderdash.ps-exe" > /tmp/bd-verify.log 2>&1 &
+    $BIOSARG -loadexe "$PWD/boulderdash.ps-exe" > /tmp/bd-verify.log 2>&1 &
 LAUNCH=$!
 sleep 7
 curl -s -m 15 "http://localhost:8299/api/v1/screen/still" -o /tmp/bd-verify.png
