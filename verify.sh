@@ -71,8 +71,18 @@ SOUND=${PIPESTATUS[0]}
 echo "  exit=$SOUND"
 [ "$SOUND" -eq 0 ] || FAIL=1
 
+RENDER=${RENDER:-1}
+if [ "$RENDER" != 1 ]; then
+    step "5/5 render SKIPPED (RENDER=0)"
+    echo "  the frame grab needs the emulator's web server, which does not come"
+    echo "  up on a runner - curl gets ECONNREFUSED on every port. Tracked on board #610; the"
+    echo "  other four gates still ran."
+else
 step "5/5 render"
-xvfb-run -a "$REDUX" -run -stdout -webserver -webserver-port 8299 -interpreter \
+# -screen ...x24: xvfb-run defaults to an 8-bit screen, and an 8-bit screen has
+# no GLX visual a 3.2 core context can match ("Couldn't find matching GLX
+# visual", measured on a runner 2026-09-21).
+xvfb-run -a -s "-screen 0 1280x1024x24" "$REDUX" -run -stdout -webserver -webserver-port 8299 -interpreter \
     $BIOSARG -loadexe "$PWD/boulderdash.ps-exe" > /tmp/bd-verify.log 2>&1 &
 LAUNCH=$!
 # Poll instead of sleeping on a guess. The still endpoint answers 200 with a
@@ -108,6 +118,8 @@ if [ "${DIMS:-}" != "320x239" ] || [ "${COLORS:-0}" -lt 6 ]; then
     echo "  --- emulator log ($(wc -c < /tmp/bd-verify.log 2>/dev/null || echo 0) bytes) ---"
     tail -20 /tmp/bd-verify.log 2>&1
     FAIL=1
+fi
+
 fi
 
 echo
