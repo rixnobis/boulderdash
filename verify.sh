@@ -75,8 +75,14 @@ step "5/5 render"
 xvfb-run -a "$REDUX" -run -stdout -webserver -webserver-port 8299 -interpreter \
     $BIOSARG -loadexe "$PWD/boulderdash.ps-exe" > /tmp/bd-verify.log 2>&1 &
 LAUNCH=$!
-sleep 7
-curl -s -m 15 "http://localhost:8299/api/v1/screen/still" -o /tmp/bd-verify.png
+# Poll instead of sleeping on a guess. The still endpoint answers 200 with a
+# valid blank PNG well before the game has drawn anything, so the colour count
+# is the readiness test, not the HTTP status.
+for _ in $(seq 1 30); do
+    sleep 1
+    curl -s -m 5 "http://localhost:8299/api/v1/screen/still" -o /tmp/bd-verify.png || continue
+    [ "$(convert /tmp/bd-verify.png -format %k info:- 2>/dev/null || echo 0)" -ge 6 ] && break
+done
 # Walk the PID tree. A `pkill -f pcsx-redux` would self-match the shell running
 # it and also kill every other worktree's emulator, including other people's.
 for p in $(pgrep -P $LAUNCH 2>/dev/null); do
@@ -90,6 +96,8 @@ COLORS=$(convert /tmp/bd-verify.png -format %k info:- 2>/dev/null)
 echo "  frame: ${DIMS:-none}, ${COLORS:-0} colors"
 if [ "${DIMS:-}" != "320x239" ] || [ "${COLORS:-0}" -lt 6 ]; then
     echo "  render FAILED (want 320x239 and >= 6 colors)"
+    echo "  --- emulator log ---"
+    tail -20 /tmp/bd-verify.log
     FAIL=1
 fi
 

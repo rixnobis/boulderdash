@@ -22,7 +22,7 @@ jobs:
       - name: Tooling for the render gate
         run: |
           apt-get update -qq
-          apt-get install -y -qq imagemagick xvfb curl unzip
+          apt-get install -y -qq imagemagick xvfb curl unzip libgl1-mesa-dri
 
       - name: pcsx-redux
         # The dev channel's Linux build, extracted rather than mounted because
@@ -35,6 +35,10 @@ jobs:
       - name: Five gates
         # No BIOS is set on purpose: verify.sh falls back to the emulator's
         # built-in OpenBIOS when the local openbios.bin is not there.
+        env:
+          # No GPU on a runner, so the render gate needs Mesa's software
+          # rasteriser to get a GL context at all.
+          LIBGL_ALWAYS_SOFTWARE: "1"
         run: REDUX="$GITHUB_WORKSPACE/squashfs-root/AppRun" ./verify.sh
 
       - uses: actions/upload-artifact@v4
